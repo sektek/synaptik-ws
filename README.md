@@ -1,9 +1,9 @@
-# Project Name
+# Synaptik Websocket
 
-Description
+Websocket support for `@sektek/synaptik`.
 
 ## Installation
 
 ```sh
-npm install @sektek/project-name
+npm install @sektek/synaptik-ws
 ```

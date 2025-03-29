@@ -1,9 +1,9 @@
 {
-  "name": "Project Name",
+  "name": "Synaptik Websocket",
   "build": {
     "dockerfile": "Dockerfile"
   },
-  "workspaceFolder": "/workspaces/project-name",
+  "workspaceFolder": "/workspaces/synaptik-ws",
   "shutdownAction": "none",
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
