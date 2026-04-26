@@ -7,7 +7,11 @@ import {
   EventChannelEvents,
   EventServiceOptions,
 } from '@sektek/synaptik';
-import { Component, getComponent } from '@sektek/utility-belt';
+import {
+  Component,
+  EventEmittingService,
+  getComponent,
+} from '@sektek/utility-belt';
 
 import {
   EventSerializerComponent,
@@ -51,7 +55,7 @@ export class WebSocketChannel<T extends Event = Event>
     this.emit(EVENT_RECEIVED, event);
 
     try {
-      const ws = await this.#webSocketProvider(event);
+      const ws = await this.#webSocketProvider();
       const data = await this.#eventSerializer(event);
       ws.send(data);
       this.emit(EVENT_DELIVERED, event);
