@@ -1,0 +1,148 @@
+import { createServer } from 'node:http';
+
+import {
+  EVENT_ERROR,
+  EVENT_PROCESSED,
+  EVENT_RECEIVED,
+  Event,
+} from '@sektek/synaptik';
+import { WebSocket, WebSocketServer } from 'ws';
+import { expect, use } from 'chai';
+import chaiAsPromised from 'chai-as-promised';
+import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
+
+import { WebSocketGateway } from './web-socket-gateway.js';
+
+use(chaiAsPromised);
+use(sinonChai);
+
+const makeEvent = (): Event => ({ type: 'ping', id: '1' });
+
+const startServer = (): Promise<{ wss: WebSocketServer; port: number }> =>
+  new Promise(resolve => {
+    const server = createServer();
+    const wss = new WebSocketServer({ server });
+    server.listen(0, () => {
+      const addr = server.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      resolve({ wss, port });
+    });
+  });
+
+const connectClient = (port: number): Promise<WebSocket> =>
+  new Promise((resolve, reject) => {
+    const client = new WebSocket(`ws://localhost:${port}`);
+    client.once('open', () => resolve(client));
+    client.once('error', reject);
+  });
+
+describe('WebSocketGateway', function () {
+  let wss: WebSocketServer;
+  let clientWs: WebSocket;
+
+  afterEach(function (done) {
+    clientWs?.close();
+    wss?.close(done);
+  });
+
+  it('dispatches incoming messages to the handler', async function () {
+    const result = await startServer();
+    wss = result.wss;
+    const port = result.port;
+    const handler = sinon.stub().resolves();
+
+    wss.once('connection', serverWs => {
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => serverWs as unknown as WebSocket,
+        handler,
+      });
+      gateway.start();
+    });
+
+    clientWs = await connectClient(port);
+    clientWs.send(JSON.stringify(makeEvent()));
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(handler.calledOnce).to.be.true;
+  });
+
+  it('emits EVENT_RECEIVED and EVENT_PROCESSED around handler', async function () {
+    const result = await startServer();
+    wss = result.wss;
+    const port = result.port;
+
+    const received = sinon.stub();
+    const processed = sinon.stub();
+    const handler = sinon.stub().resolves();
+
+    wss.once('connection', serverWs => {
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => serverWs as unknown as WebSocket,
+        handler,
+      });
+      gateway.on(EVENT_RECEIVED, received);
+      gateway.on(EVENT_PROCESSED, processed);
+      gateway.start();
+    });
+
+    clientWs = await connectClient(port);
+    clientWs.send(JSON.stringify(makeEvent()));
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(received.calledOnce).to.be.true;
+    expect(processed.calledOnce).to.be.true;
+  });
+
+  it('emits EVENT_ERROR when the handler throws', async function () {
+    const result = await startServer();
+    wss = result.wss;
+    const port = result.port;
+
+    const error = new Error('handler failed');
+    const handler = sinon.stub().rejects(error);
+    const onError = sinon.stub();
+
+    wss.once('connection', serverWs => {
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => serverWs as unknown as WebSocket,
+        handler,
+      });
+      gateway.on(EVENT_ERROR, onError);
+      gateway.start();
+    });
+
+    clientWs = await connectClient(port);
+    clientWs.send(JSON.stringify(makeEvent()));
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(onError.calledOnce).to.be.true;
+    expect(onError.firstCall.args[0]).to.equal(error);
+  });
+
+  it('stop() removes the listener so no further messages are dispatched', async function () {
+    const result = await startServer();
+    wss = result.wss;
+    const port = result.port;
+
+    const handler = sinon.stub().resolves();
+
+    const connectionDone = new Promise<void>(resolve => {
+      wss.once('connection', async serverWs => {
+        const gateway = new WebSocketGateway({
+          webSocketProvider: () => serverWs as unknown as WebSocket,
+          handler,
+        });
+        await gateway.start();
+        await gateway.stop();
+        resolve();
+      });
+    });
+    clientWs = await connectClient(port);
+    await connectionDone;
+
+    clientWs.send(JSON.stringify(makeEvent()));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(handler.callCount).to.equal(0);
+  });
+});
