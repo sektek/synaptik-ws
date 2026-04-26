@@ -1,0 +1,27 @@
+import { WebSocketLike } from './types/index.js';
+
+export type NativeWebSocketProviderOptions = {
+  url: string | URL;
+  protocol?: string | string[];
+};
+
+export class NativeWebSocketProvider {
+  #ws: WebSocket | null = null;
+  #url: string | URL;
+  #protocol: string | string[] | undefined;
+
+  constructor(opts: NativeWebSocketProviderOptions) {
+    this.#url = opts.url;
+    this.#protocol = opts.protocol;
+  }
+
+  get(): WebSocketLike {
+    if (!this.#ws) {
+      this.#ws = new WebSocket(this.#url, this.#protocol);
+      this.#ws.addEventListener('close', () => {
+        this.#ws = null;
+      });
+    }
+    return this.#ws;
+  }
+}
