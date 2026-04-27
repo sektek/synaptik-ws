@@ -11,7 +11,7 @@
   "main": "dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./ws": "./dist/ws-web-socket-provider.js"
+    "./ws": "./dist/src/ws-web-socket-provider.js"
   },
   "type": "module",
   "scripts": {

@@ -1,13 +1,13 @@
 import {
-  AbstractEventService,
+  AbstractEventComponent,
   EVENT_ERROR,
   EVENT_PROCESSED,
   EVENT_RECEIVED,
   Event,
+  EventComponentOptions,
   EventEndpointComponent,
   EventHandlerEvents,
   EventHandlerFn,
-  EventServiceOptions,
   getEventHandlerComponent,
 } from '@sektek/synaptik';
 import { EventEmittingService, getComponent } from '@sektek/utility-belt';
@@ -21,14 +21,14 @@ import {
 import { defaultEventExtractor } from './default-event-extractor.js';
 
 export type WebSocketGatewayOptions<T extends Event = Event> =
-  EventServiceOptions & {
+  EventComponentOptions & {
     eventExtractor?: EventExtractorComponent<T>;
     handler: EventEndpointComponent<T>;
     webSocketProvider: WebSocketProviderComponent;
   };
 
 export class WebSocketGateway<T extends Event = Event>
-  extends AbstractEventService
+  extends AbstractEventComponent
   implements EventEmittingService<EventHandlerEvents<T>>
 {
   #handler: EventHandlerFn<T>;

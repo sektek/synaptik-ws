@@ -1,11 +1,11 @@
 import {
-  AbstractEventService,
+  AbstractEventComponent,
   EVENT_DELIVERED,
   EVENT_ERROR,
   EVENT_RECEIVED,
   Event,
   EventChannelEvents,
-  EventServiceOptions,
+  EventComponentOptions,
 } from '@sektek/synaptik';
 import {
   Component,
@@ -30,13 +30,13 @@ export type WebSocketChannelComponent<T extends Event = Event> = Component<
 >;
 
 export type WebSocketChannelOptions<T extends Event = Event> =
-  EventServiceOptions & {
+  EventComponentOptions & {
     eventSerializer?: EventSerializerComponent<T>;
     webSocketProvider: WebSocketProviderComponent;
   };
 
 export class WebSocketChannel<T extends Event = Event>
-  extends AbstractEventService
+  extends AbstractEventComponent
   implements EventEmittingService<EventChannelEvents<T>>
 {
   #eventSerializer: EventSerializerFn<T>;
