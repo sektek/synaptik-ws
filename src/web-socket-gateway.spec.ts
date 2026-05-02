@@ -17,7 +17,7 @@ import { WebSocketGateway } from './web-socket-gateway.js';
 use(chaiAsPromised);
 use(sinonChai);
 
-const makeEvent = (): Event => ({ type: 'ping', id: '1' });
+const makeEvent = (): Event => ({ type: 'ping', id: '1', data: {} });
 
 const startServer = (): Promise<{ wss: WebSocketServer; port: number }> =>
   new Promise(resolve => {

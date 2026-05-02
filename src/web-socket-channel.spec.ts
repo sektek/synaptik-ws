@@ -15,13 +15,15 @@ use(sinonChai);
 import { WebSocketChannel } from './web-socket-channel.js';
 import { WebSocketLike } from './types/index.js';
 
-const makeEvent = (): Event => ({ type: 'test', id: '1' });
+const makeEvent = (): Event => ({ type: 'test', id: '1', data: {} });
 
 const makeFakeWs = (): WebSocketLike => ({
   send: sinon.stub(),
   close: sinon.stub(),
-  addEventListener: sinon.stub(),
-  removeEventListener: sinon.stub(),
+  addEventListener:
+    sinon.stub() as unknown as WebSocketLike['addEventListener'],
+  removeEventListener:
+    sinon.stub() as unknown as WebSocketLike['removeEventListener'],
   readyState: 1,
 });
 

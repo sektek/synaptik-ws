@@ -25,6 +25,6 @@ export interface EventExtractor<T extends Event = Event> {
  * @template T Event type to extract.
  */
 export type EventExtractorComponent<T extends Event = Event> = Component<
-  EventExtractorFn<T>,
+  EventExtractor<T>,
   'extract'
 >;

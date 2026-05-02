@@ -27,6 +27,6 @@ export interface EventSerializer<T extends Event = Event> {
  * @template T Event type to serialize.
  */
 export type EventSerializerComponent<T extends Event = Event> = Component<
-  EventSerializerFn<T>,
+  EventSerializer<T>,
   'serialize'
 >;
