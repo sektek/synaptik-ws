@@ -20,7 +20,11 @@ import {
 } from './types/index.js';
 import { defaultEventExtractor } from './default-event-extractor.js';
 
-/** Options for constructing a `WebSocketGateway`. */
+/**
+ * Options for constructing a `WebSocketGateway`.
+ *
+ * @template T The event type produced by the extractor.
+ */
 export type WebSocketGatewayOptions<T extends Event = Event> =
   EventComponentOptions & {
     /** Extracts events from raw WebSocket messages. Defaults to `defaultEventExtractor`. */

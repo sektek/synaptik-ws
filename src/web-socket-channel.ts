@@ -20,18 +20,30 @@ import {
   WebSocketProviderFn,
 } from './types/index.js';
 
-/** Function signature matching `WebSocketChannel.send`. */
+/**
+ * Function signature matching `WebSocketChannel.send`.
+ *
+ * @template T The event type this function accepts.
+ */
 export type WebSocketChannelFn<T extends Event = Event> = (
   event: T,
 ) => Promise<void>;
 
-/** Accepts either a `WebSocketChannel` instance or a bare `WebSocketChannelFn`. */
+/**
+ * Accepts either a `WebSocketChannel` instance or a bare `WebSocketChannelFn`.
+ *
+ * @template T The event type the channel handles.
+ */
 export type WebSocketChannelComponent<T extends Event = Event> = Component<
   WebSocketChannel<T>,
   'send'
 >;
 
-/** Options for constructing a `WebSocketChannel`. */
+/**
+ * Options for constructing a `WebSocketChannel`.
+ *
+ * @template T The event type this channel handles.
+ */
 export type WebSocketChannelOptions<T extends Event = Event> =
   EventComponentOptions & {
     /** Serializer applied before `ws.send`. Defaults to `JSON.stringify`. */
