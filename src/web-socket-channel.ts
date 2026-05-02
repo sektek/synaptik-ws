@@ -20,21 +20,34 @@ import {
   WebSocketProviderFn,
 } from './types/index.js';
 
+/** Function signature matching `WebSocketChannel.send`. */
 export type WebSocketChannelFn<T extends Event = Event> = (
   event: T,
 ) => Promise<void>;
 
+/** Accepts either a `WebSocketChannel` instance or a bare `WebSocketChannelFn`. */
 export type WebSocketChannelComponent<T extends Event = Event> = Component<
   WebSocketChannel<T>,
   'send'
 >;
 
+/** Options for constructing a `WebSocketChannel`. */
 export type WebSocketChannelOptions<T extends Event = Event> =
   EventComponentOptions & {
+    /** Serializer applied before `ws.send`. Defaults to `JSON.stringify`. */
     eventSerializer?: EventSerializerComponent<T>;
+    /** Resolves the target `WebSocketLike` at send time. */
     webSocketProvider: WebSocketProviderComponent;
   };
 
+/**
+ * Sends events over a WebSocket connection.
+ *
+ * Emits `EVENT_RECEIVED` before serialization, `EVENT_DELIVERED` after a
+ * successful send, and `EVENT_ERROR` (re-throwing) on failure.
+ *
+ * @template T The event type this channel handles.
+ */
 export class WebSocketChannel<T extends Event = Event>
   extends AbstractEventComponent
   implements EventEmittingService<EventChannelEvents<T>>
@@ -51,6 +64,11 @@ export class WebSocketChannel<T extends Event = Event>
     });
   }
 
+  /**
+   * Serialize and transmit `event` over the WebSocket.
+   *
+   * @param event - The event to send.
+   */
   async send(event: T): Promise<void> {
     this.emit(EVENT_RECEIVED, event);
 

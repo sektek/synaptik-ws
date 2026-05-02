@@ -2,6 +2,15 @@ import { Event } from '@sektek/synaptik';
 
 import { EventExtractorFn } from './types/index.js';
 
+/**
+ * Parses a JSON text-frame `MessageEvent` into an `Event`.
+ *
+ * Binary payloads (`ArrayBuffer`, `ArrayBufferView`) are rejected; provide a
+ * custom `eventExtractor` in `WebSocketGatewayOptions` for binary protocols.
+ *
+ * @param messageEvent - The raw WebSocket message event.
+ * @returns The parsed event.
+ */
 export const defaultEventExtractor: EventExtractorFn = (
   messageEvent: MessageEvent,
 ): Event => {

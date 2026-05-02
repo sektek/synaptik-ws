@@ -20,13 +20,26 @@ import {
 } from './types/index.js';
 import { defaultEventExtractor } from './default-event-extractor.js';
 
+/** Options for constructing a `WebSocketGateway`. */
 export type WebSocketGatewayOptions<T extends Event = Event> =
   EventComponentOptions & {
+    /** Extracts events from raw WebSocket messages. Defaults to `defaultEventExtractor`. */
     eventExtractor?: EventExtractorComponent<T>;
+    /** Downstream handler that processes each extracted event. */
     handler: EventEndpointComponent<T>;
+    /** Resolves the `WebSocketLike` to listen on. */
     webSocketProvider: WebSocketProviderComponent;
   };
 
+/**
+ * Listens on a WebSocket connection and dispatches each incoming message to a
+ * handler after extracting it into a typed event.
+ *
+ * Call `start()` to attach the message listener and `stop()` to detach it.
+ * Emits `EVENT_RECEIVED`, `EVENT_PROCESSED`, and `EVENT_ERROR` lifecycle events.
+ *
+ * @template T The event type produced by the extractor.
+ */
 export class WebSocketGateway<T extends Event = Event>
   extends AbstractEventComponent
   implements EventEmittingService<EventHandlerEvents<T>>
@@ -47,11 +60,13 @@ export class WebSocketGateway<T extends Event = Event>
     this.#messageHandler = this.#handleMessage.bind(this);
   }
 
+  /** Attach the message listener to the WebSocket. */
   async start(): Promise<void> {
     const ws = await this.#webSocketProvider();
     ws.addEventListener('message', this.#messageHandler);
   }
 
+  /** Detach the message listener from the WebSocket. */
   async stop(): Promise<void> {
     const ws = await this.#webSocketProvider();
     ws.removeEventListener('message', this.#messageHandler);
