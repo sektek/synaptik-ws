@@ -19,10 +19,22 @@ import {
   WebSocketProviderComponent,
   WebSocketProviderFn,
 } from './types/index.js';
+import { CONNECTION_CLOSED } from './events.js';
 import { defaultEventExtractor } from './default-event-extractor.js';
 
 /** Default maximum inbound message size (100 KB). */
 export const DEFAULT_MAX_PAYLOAD_SIZE = 100 * 1024;
+
+/**
+ * Events emitted by `WebSocketGateway`.
+ *
+ * @template T The event type produced by the extractor.
+ */
+export type WebSocketGatewayEvents<T extends Event = Event> =
+  EventHandlerEvents<T> & {
+    /** Emitted when the underlying socket closes while the gateway is started. */
+    [CONNECTION_CLOSED]: () => void;
+  };
 
 /**
  * Options for constructing a `WebSocketGateway`.
@@ -31,6 +43,13 @@ export const DEFAULT_MAX_PAYLOAD_SIZE = 100 * 1024;
  */
 export type WebSocketGatewayOptions<T extends Event = Event> =
   EventComponentOptions & {
+    /**
+     * When `true`, the gateway automatically calls `start()` again after the
+     * socket closes, using the `webSocketProvider` to obtain a fresh connection.
+     * Has no effect if `stop()` has been called explicitly.
+     * Defaults to `false`.
+     */
+    autoRestart?: boolean;
     /** Extracts events from raw WebSocket messages. Defaults to `defaultEventExtractor`. */
     eventExtractor?: EventExtractorComponent<T>;
     /** Downstream handler that processes each extracted event. */
@@ -56,13 +75,16 @@ export type WebSocketGatewayOptions<T extends Event = Event> =
  */
 export class WebSocketGateway<T extends Event = Event>
   extends AbstractEventComponent
-  implements EventEmittingService<EventHandlerEvents<T>>
+  implements EventEmittingService<WebSocketGatewayEvents<T>>
 {
+  #autoRestart: boolean;
   #handler: EventHandlerFn<T>;
   #eventExtractor: EventExtractorFn<T>;
   #generation = 0;
   #maxPayloadSize: number;
+  #started = false;
   #webSocketProvider: WebSocketProviderFn;
+  #closeHandler: () => void;
   #messageHandler: (messageEvent: MessageEvent) => Promise<void>;
   #ws: WebSocketLike | null = null;
 
@@ -74,7 +96,9 @@ export class WebSocketGateway<T extends Event = Event>
       default: defaultEventExtractor as EventExtractorFn<T>,
     });
     this.#handler = getEventHandlerComponent(opts.handler);
+    this.#autoRestart = opts.autoRestart ?? false;
     this.#maxPayloadSize = opts.maxPayloadSize ?? DEFAULT_MAX_PAYLOAD_SIZE;
+    this.#closeHandler = this.#handleClose.bind(this);
     this.#messageHandler = this.#handleMessage.bind(this);
   }
 
@@ -86,24 +110,44 @@ export class WebSocketGateway<T extends Event = Event>
    * resolves, the in-flight `start()` is abandoned and no listener is attached.
    */
   async start(): Promise<void> {
+    this.#started = true;
     this.#ws?.removeEventListener('message', this.#messageHandler);
+    this.#ws?.removeEventListener('close', this.#closeHandler);
     this.#ws = null;
     const gen = ++this.#generation;
     const ws = await this.#webSocketProvider();
     if (gen !== this.#generation) return;
     this.#ws = ws;
     this.#ws.addEventListener('message', this.#messageHandler);
+    this.#ws.addEventListener('close', this.#closeHandler);
   }
 
   /**
    * Detach the message listener from the cached WebSocket and release it.
    *
-   * Invalidates any `start()` call that is still awaiting the provider.
+   * Invalidates any `start()` call that is still awaiting the provider, and
+   * suppresses any pending auto-restart triggered by a socket close.
    */
   async stop(): Promise<void> {
+    this.#started = false;
     ++this.#generation;
     this.#ws?.removeEventListener('message', this.#messageHandler);
+    this.#ws?.removeEventListener('close', this.#closeHandler);
     this.#ws = null;
+  }
+
+  #handleClose(): void {
+    this.#ws = null;
+    this.emit(CONNECTION_CLOSED);
+    if (this.#started && this.#autoRestart) {
+      (async () => {
+        try {
+          await this.start();
+        } catch (err) {
+          this.emit(EVENT_ERROR, err, undefined);
+        }
+      })();
+    }
   }
 
   async #handleMessage(messageEvent: MessageEvent): Promise<void> {

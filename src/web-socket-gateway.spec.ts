@@ -10,6 +10,7 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
+import { CONNECTION_CLOSED } from './events.js';
 import { WebSocketGateway } from './web-socket-gateway.js';
 import { WebSocketLike } from './types/index.js';
 
@@ -148,7 +149,7 @@ describe('WebSocketGateway', function () {
     await gateway.stop();
 
     expect(wsAtStart.removeEventListener as sinon.SinonStub).to.have.been
-      .calledOnce;
+      .calledTwice;
     expect(wsAfterReconnect.removeEventListener as sinon.SinonStub).not.to.have
       .been.called;
   });
@@ -194,9 +195,9 @@ describe('WebSocketGateway', function () {
     await gateway.start();
 
     expect(wsFirst.removeEventListener as sinon.SinonStub).to.have.been
-      .calledOnce;
+      .calledTwice;
     expect(wsSecond.addEventListener as sinon.SinonStub).to.have.been
-      .calledOnce;
+      .calledTwice;
   });
 
   it('stop() called before provider resolves abandons the in-flight start()', async function () {
@@ -244,5 +245,116 @@ describe('WebSocketGateway', function () {
     expect((onError.firstCall.args[0] as Error).message).to.match(
       /maxPayloadSize/,
     );
+  });
+
+  it('emits CONNECTION_CLOSED when the socket closes', async function () {
+    const result = await startServer();
+    wss = result.wss;
+    const port = result.port;
+
+    const onClosed = sinon.stub();
+
+    const connectionDone = new Promise<void>(resolve => {
+      wss!.once('connection', async serverWs => {
+        const gateway = new WebSocketGateway({
+          webSocketProvider: () => serverWs as unknown as WebSocket,
+          handler: sinon.stub().resolves(),
+        });
+        gateway.on(CONNECTION_CLOSED, onClosed);
+        await gateway.start();
+        resolve();
+      });
+    });
+
+    clientWs = await connectClient(port);
+    await connectionDone;
+
+    clientWs.close();
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(onClosed.calledOnce).to.be.true;
+  });
+
+  it('does not emit CONNECTION_CLOSED after stop()', async function () {
+    const result = await startServer();
+    wss = result.wss;
+    const port = result.port;
+
+    const onClosed = sinon.stub();
+
+    const connectionDone = new Promise<void>(resolve => {
+      wss!.once('connection', async serverWs => {
+        const gateway = new WebSocketGateway({
+          webSocketProvider: () => serverWs as unknown as WebSocket,
+          handler: sinon.stub().resolves(),
+        });
+        gateway.on(CONNECTION_CLOSED, onClosed);
+        await gateway.start();
+        await gateway.stop();
+        resolve();
+      });
+    });
+
+    clientWs = await connectClient(port);
+    await connectionDone;
+
+    clientWs.close();
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(onClosed.called).to.be.false;
+  });
+
+  it('auto-restarts after socket close when autoRestart is true', async function () {
+    const ws1 = makeFakeWs();
+    const ws2 = makeFakeWs();
+    let callCount = 0;
+    const provider = () => (callCount++ === 0 ? ws1 : ws2);
+
+    const gateway = new WebSocketGateway({
+      webSocketProvider: provider,
+      handler: sinon.stub().resolves(),
+      autoRestart: true,
+    });
+
+    await gateway.start();
+
+    const closeHandler = (ws1.addEventListener as sinon.SinonStub)
+      .getCalls()
+      .find(c => c.args[0] === 'close')?.args[1] as () => void;
+
+    closeHandler();
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(ws2.addEventListener as sinon.SinonStub).to.have.been.calledWith(
+      'message',
+      sinon.match.func,
+    );
+
+    await gateway.stop();
+  });
+
+  it('does not auto-restart after stop()', async function () {
+    const ws1 = makeFakeWs();
+    const ws2 = makeFakeWs();
+    let callCount = 0;
+    const provider = () => (callCount++ === 0 ? ws1 : ws2);
+
+    const gateway = new WebSocketGateway({
+      webSocketProvider: provider,
+      handler: sinon.stub().resolves(),
+      autoRestart: true,
+    });
+
+    await gateway.start();
+    await gateway.stop();
+
+    const closeHandler = (ws1.addEventListener as sinon.SinonStub)
+      .getCalls()
+      .find(c => c.args[0] === 'close')?.args[1] as (() => void) | undefined;
+
+    closeHandler?.();
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    expect(ws2.addEventListener as sinon.SinonStub).not.to.have.been.called;
   });
 });
