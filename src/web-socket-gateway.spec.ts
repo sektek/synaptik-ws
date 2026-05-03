@@ -1,5 +1,3 @@
-import { createServer } from 'node:http';
-
 import {
   EVENT_ERROR,
   EVENT_PROCESSED,
@@ -32,12 +30,9 @@ const makeFakeWs = (): WebSocketLike => ({
 
 const startServer = (): Promise<{ wss: WebSocketServer; port: number }> =>
   new Promise(resolve => {
-    const server = createServer();
-    const wss = new WebSocketServer({ server });
-    server.listen(0, () => {
-      const addr = server.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-      resolve({ wss, port });
+    const wss = new WebSocketServer({ port: 0 }, () => {
+      const addr = wss.address() as { port: number };
+      resolve({ wss, port: addr.port });
     });
   });
 

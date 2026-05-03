@@ -1,5 +1,3 @@
-import { createServer } from 'node:http';
-
 import { WebSocket, WebSocketServer } from 'ws';
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -10,12 +8,9 @@ use(chaiAsPromised);
 
 const startServer = (): Promise<{ wss: WebSocketServer; port: number }> =>
   new Promise(resolve => {
-    const server = createServer();
-    const wss = new WebSocketServer({ server });
-    server.listen(0, () => {
-      const addr = server.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-      resolve({ wss, port });
+    const wss = new WebSocketServer({ port: 0 }, () => {
+      const addr = wss.address() as { port: number };
+      resolve({ wss, port: addr.port });
     });
   });
 
@@ -53,6 +48,7 @@ describe('WsWebSocketProvider', function () {
 
     const ws1 = provider.get();
     const ws2 = provider.get();
+    await new Promise(resolve => wss.once('connection', resolve));
 
     expect(ws1).to.equal(ws2);
   });
@@ -71,7 +67,9 @@ describe('WsWebSocketProvider', function () {
     ws1.close();
     await wait(50);
 
-    const ws2 = provider.get();
+    const ws2 = provider.get() as unknown as WebSocket;
+    await new Promise(resolve => wss.once('connection', resolve));
+
     expect(ws2).to.not.equal(ws1);
   });
 });
