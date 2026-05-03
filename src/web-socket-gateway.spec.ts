@@ -49,12 +49,19 @@ const connectClient = (port: number): Promise<WebSocket> =>
   });
 
 describe('WebSocketGateway', function () {
-  let wss: WebSocketServer;
-  let clientWs: WebSocket;
+  let wss: WebSocketServer | undefined;
+  let clientWs: WebSocket | undefined;
 
   afterEach(function (done) {
     clientWs?.close();
-    wss?.close(done);
+    clientWs = undefined;
+    if (wss) {
+      const server = wss;
+      wss = undefined;
+      server.close(done);
+    } else {
+      done();
+    }
   });
 
   it('dispatches incoming messages to the handler', async function () {
@@ -159,7 +166,7 @@ describe('WebSocketGateway', function () {
     const handler = sinon.stub().resolves();
 
     const connectionDone = new Promise<void>(resolve => {
-      wss.once('connection', async serverWs => {
+      wss!.once('connection', async serverWs => {
         const gateway = new WebSocketGateway({
           webSocketProvider: () => serverWs as unknown as WebSocket,
           handler,
