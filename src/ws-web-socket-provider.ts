@@ -1,17 +1,20 @@
 import {
   HeadersProviderComponent,
   HeadersProviderFn,
-  UrlProviderComponent,
   UrlProviderFn,
   getComponent,
 } from '@sektek/utility-belt';
 import { type HeadersInit } from 'undici-types';
 import { WebSocket } from 'ws';
 
-import { WebSocketLike } from './types/index.js';
+import { WebSocketLike, WebSocketProviderOptions } from './types/index.js';
 
-/** Options for `WsWebSocketProvider`. */
-type WsWebSocketProviderOptions = {
+/**
+ * Options for `WsWebSocketProvider`.
+ *
+ * Extends {@link WebSocketProviderOptions} with Node.js-specific options.
+ */
+export type WsWebSocketProviderOptions = WebSocketProviderOptions & {
   /**
    * Provider called before each new connection to supply HTTP upgrade request
    * headers (e.g. `Authorization`). Called fresh on every reconnect so tokens
@@ -21,16 +24,6 @@ type WsWebSocketProviderOptions = {
    * headers. Use this option only with `WsWebSocketProvider` (Node.js).
    */
   headersProvider?: HeadersProviderComponent;
-  /**
-   * Static URL to connect to. Ignored if `urlProvider` is also supplied.
-   */
-  url?: string | URL;
-  /**
-   * Provider that resolves the WebSocket URL before each new connection.
-   * Called fresh on every reconnect, so session URLs and signed tokens
-   * embedded in the URL are always current. Takes precedence over `url`.
-   */
-  urlProvider?: UrlProviderComponent<void>;
 };
 
 /**

@@ -1,25 +1,15 @@
-import {
-  UrlProviderComponent,
-  UrlProviderFn,
-  getComponent,
-} from '@sektek/utility-belt';
+import { UrlProviderFn, getComponent } from '@sektek/utility-belt';
 
-import { WebSocketLike } from './types/index.js';
+import { WebSocketLike, WebSocketProviderOptions } from './types/index.js';
 
-/** Options for `NativeWebSocketProvider`. */
-export type NativeWebSocketProviderOptions = {
+/**
+ * Options for `NativeWebSocketProvider`.
+ *
+ * Extends {@link WebSocketProviderOptions} with browser-specific options.
+ */
+export type NativeWebSocketProviderOptions = WebSocketProviderOptions & {
   /** Optional subprotocol(s) to negotiate. */
   protocol?: string | string[];
-  /**
-   * Static URL to connect to. Ignored if `urlProvider` is also supplied.
-   */
-  url?: string | URL;
-  /**
-   * Provider that resolves the WebSocket URL before each new connection.
-   * Called fresh on every reconnect, so session URLs and signed tokens
-   * embedded in the URL are always current. Takes precedence over `url`.
-   */
-  urlProvider?: UrlProviderComponent<void>;
 };
 
 /**
