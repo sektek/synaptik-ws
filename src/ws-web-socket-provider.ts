@@ -7,7 +7,11 @@ import {
 import { type HeadersInit } from 'undici-types';
 import { WebSocket } from 'ws';
 
-import { WebSocketLike, WebSocketProviderOptions } from './types/index.js';
+import {
+  WebSocketLike,
+  WebSocketProvider,
+  WebSocketProviderOptions,
+} from './types/index.js';
 
 /**
  * Options for `WsWebSocketProvider`.
@@ -62,7 +66,7 @@ function toHeadersRecord(init: HeadersInit): Record<string, string> {
  * `headersProvider` are called fresh on every new connection so session URLs
  * and auth tokens are always current.
  */
-export class WsWebSocketProvider {
+export class WsWebSocketProvider implements WebSocketProvider {
   #ws: WebSocket | null = null;
   #pending: Promise<WebSocket> | null = null;
   #urlProvider: UrlProviderFn<void>;

@@ -1,6 +1,10 @@
 import { UrlProviderFn, getComponent } from '@sektek/utility-belt';
 
-import { WebSocketLike, WebSocketProviderOptions } from './types/index.js';
+import {
+  WebSocketLike,
+  WebSocketProvider,
+  WebSocketProviderOptions,
+} from './types/index.js';
 
 /**
  * Options for `NativeWebSocketProvider`.
@@ -25,7 +29,7 @@ export type NativeWebSocketProviderOptions = WebSocketProviderOptions & {
  * (Node.js) with its `headersProvider` option, or encode credentials in the
  * URL via a session URL returned by `urlProvider`.
  */
-export class NativeWebSocketProvider {
+export class NativeWebSocketProvider implements WebSocketProvider {
   #ws: WebSocket | null = null;
   #pending: Promise<WebSocket> | null = null;
   #urlProvider: UrlProviderFn<void>;

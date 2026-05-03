@@ -1,3 +1,11 @@
+/** `readyState` values shared by browser `WebSocket` and `ws.WebSocket`. */
+export const WebSocketReadyState = {
+  CONNECTING: 0,
+  OPEN: 1,
+  CLOSING: 2,
+  CLOSED: 3,
+} as const;
+
 /** Structural interface satisfied by both `WebSocket` (browser) and `ws.WebSocket` (Node). */
 export interface WebSocketLike {
   /** Transmit data to the remote end. */
@@ -21,6 +29,6 @@ export interface WebSocketLike {
   /** Remove a previously registered close listener. */
   removeEventListener(type: 'close', listener: () => void): void;
 
-  /** Current connection state. `1` = OPEN. */
+  /** Current connection state. See {@link WebSocketReadyState} for named values. */
   readonly readyState: number;
 }
