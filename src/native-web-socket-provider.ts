@@ -19,7 +19,7 @@ export type NativeWebSocketProviderOptions = {
    * Called fresh on every reconnect, so session URLs and signed tokens
    * embedded in the URL are always current. Takes precedence over `url`.
    */
-  urlProvider?: UrlProviderComponent;
+  urlProvider?: UrlProviderComponent<void>;
 };
 
 /**
@@ -38,7 +38,7 @@ export type NativeWebSocketProviderOptions = {
 export class NativeWebSocketProvider {
   #ws: WebSocket | null = null;
   #pending: Promise<WebSocket> | null = null;
-  #urlProvider: UrlProviderFn;
+  #urlProvider: UrlProviderFn<void>;
   #protocol: string | string[] | undefined;
 
   constructor(opts: NativeWebSocketProviderOptions) {

@@ -30,7 +30,7 @@ type WsWebSocketProviderOptions = {
    * Called fresh on every reconnect, so session URLs and signed tokens
    * embedded in the URL are always current. Takes precedence over `url`.
    */
-  urlProvider?: UrlProviderComponent;
+  urlProvider?: UrlProviderComponent<void>;
 };
 
 /**
@@ -72,7 +72,7 @@ function toHeadersRecord(init: HeadersInit): Record<string, string> {
 export class WsWebSocketProvider {
   #ws: WebSocket | null = null;
   #pending: Promise<WebSocket> | null = null;
-  #urlProvider: UrlProviderFn;
+  #urlProvider: UrlProviderFn<void>;
   #headersProvider: HeadersProviderFn | undefined;
 
   constructor(opts: WsWebSocketProviderOptions) {
