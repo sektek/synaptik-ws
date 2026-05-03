@@ -21,6 +21,9 @@ import {
 } from './types/index.js';
 import { defaultEventExtractor } from './default-event-extractor.js';
 
+/** Default maximum inbound message size (100 KB). */
+export const DEFAULT_MAX_PAYLOAD_SIZE = 100 * 1024;
+
 /**
  * Options for constructing a `WebSocketGateway`.
  *
@@ -32,6 +35,12 @@ export type WebSocketGatewayOptions<T extends Event = Event> =
     eventExtractor?: EventExtractorComponent<T>;
     /** Downstream handler that processes each extracted event. */
     handler: EventEndpointComponent<T>;
+    /**
+     * Maximum inbound message size in bytes before extraction is attempted.
+     * Messages exceeding this limit are rejected with an `EVENT_ERROR`.
+     * Defaults to `DEFAULT_MAX_PAYLOAD_SIZE` (100 KB).
+     */
+    maxPayloadSize?: number;
     /** Resolves the `WebSocketLike` to listen on. */
     webSocketProvider: WebSocketProviderComponent;
   };
@@ -51,6 +60,7 @@ export class WebSocketGateway<T extends Event = Event>
 {
   #handler: EventHandlerFn<T>;
   #eventExtractor: EventExtractorFn<T>;
+  #maxPayloadSize: number;
   #webSocketProvider: WebSocketProviderFn;
   #messageHandler: (messageEvent: MessageEvent) => Promise<void>;
   #ws: WebSocketLike | null = null;
@@ -63,6 +73,7 @@ export class WebSocketGateway<T extends Event = Event>
       default: defaultEventExtractor as EventExtractorFn<T>,
     });
     this.#handler = getEventHandlerComponent(opts.handler);
+    this.#maxPayloadSize = opts.maxPayloadSize ?? DEFAULT_MAX_PAYLOAD_SIZE;
     this.#messageHandler = this.#handleMessage.bind(this);
   }
 
@@ -81,6 +92,14 @@ export class WebSocketGateway<T extends Event = Event>
   async #handleMessage(messageEvent: MessageEvent): Promise<void> {
     let event: T | undefined;
     try {
+      const payloadSize = this.#measurePayload(messageEvent.data);
+
+      if (payloadSize > this.#maxPayloadSize) {
+        throw new Error(
+          `Message payload (${payloadSize} bytes) exceeds maxPayloadSize limit of ${this.#maxPayloadSize} bytes`,
+        );
+      }
+
       event = await this.#eventExtractor(messageEvent);
       this.emit(EVENT_RECEIVED, event);
       await this.#handler(event);
@@ -88,5 +107,13 @@ export class WebSocketGateway<T extends Event = Event>
     } catch (err) {
       this.emit(EVENT_ERROR, err, event);
     }
+  }
+
+  #measurePayload(data: MessageEvent['data']): number {
+    if (typeof data === 'string') return data.length;
+    if (data instanceof ArrayBuffer) return data.byteLength;
+    if (ArrayBuffer.isView(data)) return data.byteLength;
+    if (typeof Blob !== 'undefined' && data instanceof Blob) return data.size;
+    return 0;
   }
 }

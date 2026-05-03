@@ -178,4 +178,31 @@ describe('WebSocketGateway', function () {
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(handler.callCount).to.equal(0);
   });
+
+  it('emits EVENT_ERROR when the message exceeds maxPayloadSize', async function () {
+    const result = await startServer();
+    wss = result.wss;
+    const port = result.port;
+
+    const onError = sinon.stub();
+
+    wss.once('connection', serverWs => {
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => serverWs as unknown as WebSocket,
+        handler: sinon.stub().resolves(),
+        maxPayloadSize: 10,
+      });
+      gateway.on(EVENT_ERROR, onError);
+      gateway.start();
+    });
+
+    clientWs = await connectClient(port);
+    clientWs.send(JSON.stringify(makeEvent()));
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(onError.calledOnce).to.be.true;
+    expect((onError.firstCall.args[0] as Error).message).to.match(
+      /maxPayloadSize/,
+    );
+  });
 });
