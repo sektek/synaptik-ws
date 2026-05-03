@@ -24,7 +24,7 @@ type WsWebSocketProviderOptions = {
   /**
    * Static URL to connect to. Ignored if `urlProvider` is also supplied.
    */
-  url?: string;
+  url?: string | URL;
   /**
    * Provider that resolves the WebSocket URL before each new connection.
    * Called fresh on every reconnect, so session URLs and signed tokens
