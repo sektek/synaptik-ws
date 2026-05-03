@@ -179,6 +179,46 @@ describe('WebSocketGateway', function () {
     expect(handler.callCount).to.equal(0);
   });
 
+  it('start() cleans up the old listener when called again without stop()', async function () {
+    const wsFirst = makeFakeWs();
+    const wsSecond = makeFakeWs();
+    let callCount = 0;
+    const provider = () => (callCount++ === 0 ? wsFirst : wsSecond);
+
+    const gateway = new WebSocketGateway({
+      webSocketProvider: provider,
+      handler: sinon.stub().resolves(),
+    });
+
+    await gateway.start();
+    await gateway.start();
+
+    expect(wsFirst.removeEventListener as sinon.SinonStub).to.have.been
+      .calledOnce;
+    expect(wsSecond.addEventListener as sinon.SinonStub).to.have.been
+      .calledOnce;
+  });
+
+  it('stop() called before provider resolves abandons the in-flight start()', async function () {
+    let resolveProvider!: (ws: WebSocketLike) => void;
+    const pendingProvider = new Promise<WebSocketLike>(
+      resolve => (resolveProvider = resolve),
+    );
+
+    const gateway = new WebSocketGateway({
+      webSocketProvider: () => pendingProvider,
+      handler: sinon.stub().resolves(),
+    });
+
+    const starting = gateway.start();
+    await gateway.stop();
+    const ws = makeFakeWs();
+    resolveProvider(ws);
+    await starting;
+
+    expect(ws.addEventListener as sinon.SinonStub).not.to.have.been.called;
+  });
+
   it('emits EVENT_ERROR when the message exceeds maxPayloadSize', async function () {
     const result = await startServer();
     wss = result.wss;

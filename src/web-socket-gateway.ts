@@ -60,6 +60,7 @@ export class WebSocketGateway<T extends Event = Event>
 {
   #handler: EventHandlerFn<T>;
   #eventExtractor: EventExtractorFn<T>;
+  #generation = 0;
   #maxPayloadSize: number;
   #webSocketProvider: WebSocketProviderFn;
   #messageHandler: (messageEvent: MessageEvent) => Promise<void>;
@@ -77,14 +78,30 @@ export class WebSocketGateway<T extends Event = Event>
     this.#messageHandler = this.#handleMessage.bind(this);
   }
 
-  /** Resolve and cache the WebSocket, then attach the message listener. */
+  /**
+   * Resolve and cache the WebSocket, then attach the message listener.
+   *
+   * Safe to call multiple times: detaches from any previously cached socket
+   * before attaching to the new one. If `stop()` is called before the provider
+   * resolves, the in-flight `start()` is abandoned and no listener is attached.
+   */
   async start(): Promise<void> {
-    this.#ws = await this.#webSocketProvider();
+    this.#ws?.removeEventListener('message', this.#messageHandler);
+    this.#ws = null;
+    const gen = ++this.#generation;
+    const ws = await this.#webSocketProvider();
+    if (gen !== this.#generation) return;
+    this.#ws = ws;
     this.#ws.addEventListener('message', this.#messageHandler);
   }
 
-  /** Detach the message listener from the cached WebSocket and release it. */
+  /**
+   * Detach the message listener from the cached WebSocket and release it.
+   *
+   * Invalidates any `start()` call that is still awaiting the provider.
+   */
   async stop(): Promise<void> {
+    ++this.#generation;
     this.#ws?.removeEventListener('message', this.#messageHandler);
     this.#ws = null;
   }
