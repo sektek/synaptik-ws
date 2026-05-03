@@ -247,6 +247,55 @@ describe('WebSocketGateway', function () {
     );
   });
 
+  it('emits EVENT_ERROR when a Buffer[] payload exceeds maxPayloadSize', async function () {
+    const ws = makeFakeWs();
+    const onError = sinon.stub();
+
+    const gateway = new WebSocketGateway({
+      webSocketProvider: () => ws,
+      handler: sinon.stub().resolves(),
+      maxPayloadSize: 4,
+    });
+    gateway.on(EVENT_ERROR, onError);
+    await gateway.start();
+
+    const messageHandler = (ws.addEventListener as sinon.SinonStub)
+      .getCalls()
+      .find(c => c.args[0] === 'message')?.args[1] as (e: MessageEvent) => void;
+
+    const chunks = [Buffer.from('hello'), Buffer.from('world')];
+    await messageHandler({ data: chunks } as unknown as MessageEvent);
+
+    expect(onError.calledOnce).to.be.true;
+    expect((onError.firstCall.args[0] as Error).message).to.match(
+      /maxPayloadSize/,
+    );
+  });
+
+  it('emits EVENT_ERROR for unknown payload types', async function () {
+    const ws = makeFakeWs();
+    const onError = sinon.stub();
+
+    const gateway = new WebSocketGateway({
+      webSocketProvider: () => ws,
+      handler: sinon.stub().resolves(),
+      maxPayloadSize: 100,
+    });
+    gateway.on(EVENT_ERROR, onError);
+    await gateway.start();
+
+    const messageHandler = (ws.addEventListener as sinon.SinonStub)
+      .getCalls()
+      .find(c => c.args[0] === 'message')?.args[1] as (e: MessageEvent) => void;
+
+    await messageHandler({ data: 42 } as unknown as MessageEvent);
+
+    expect(onError.calledOnce).to.be.true;
+    expect((onError.firstCall.args[0] as Error).message).to.match(
+      /maxPayloadSize/,
+    );
+  });
+
   it('emits CONNECTION_CLOSED when the socket closes', async function () {
     const result = await startServer();
     wss = result.wss;

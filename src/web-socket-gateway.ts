@@ -175,6 +175,11 @@ export class WebSocketGateway<T extends Event = Event>
     if (data instanceof ArrayBuffer) return data.byteLength;
     if (ArrayBuffer.isView(data)) return data.byteLength;
     if (typeof Blob !== 'undefined' && data instanceof Blob) return data.size;
-    return 0;
+    if (Array.isArray(data))
+      return (data as ArrayBufferView[]).reduce(
+        (sum, chunk) => sum + chunk.byteLength,
+        0,
+      );
+    return Infinity;
   }
 }
