@@ -13,11 +13,22 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import { WebSocketGateway } from './web-socket-gateway.js';
+import { WebSocketLike } from './types/index.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
 const makeEvent = (): Event => ({ type: 'ping', id: '1', data: {} });
+
+const makeFakeWs = (): WebSocketLike => ({
+  send: sinon.stub(),
+  close: sinon.stub(),
+  addEventListener:
+    sinon.stub() as unknown as WebSocketLike['addEventListener'],
+  removeEventListener:
+    sinon.stub() as unknown as WebSocketLike['removeEventListener'],
+  readyState: 1,
+});
 
 const startServer = (): Promise<{ wss: WebSocketServer; port: number }> =>
   new Promise(resolve => {
@@ -118,6 +129,26 @@ describe('WebSocketGateway', function () {
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(onError.calledOnce).to.be.true;
     expect(onError.firstCall.args[0]).to.equal(error);
+  });
+
+  it('stop() removes the listener from the socket resolved at start(), not from a new provider call', async function () {
+    const wsAtStart = makeFakeWs();
+    const wsAfterReconnect = makeFakeWs();
+    let callCount = 0;
+    const provider = () => (callCount++ === 0 ? wsAtStart : wsAfterReconnect);
+
+    const gateway = new WebSocketGateway({
+      webSocketProvider: provider,
+      handler: sinon.stub().resolves(),
+    });
+
+    await gateway.start();
+    await gateway.stop();
+
+    expect(wsAtStart.removeEventListener as sinon.SinonStub).to.have.been
+      .calledOnce;
+    expect(wsAfterReconnect.removeEventListener as sinon.SinonStub).not.to.have
+      .been.called;
   });
 
   it('stop() removes the listener so no further messages are dispatched', async function () {

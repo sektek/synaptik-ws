@@ -15,6 +15,7 @@ import { EventEmittingService, getComponent } from '@sektek/utility-belt';
 import {
   EventExtractorComponent,
   EventExtractorFn,
+  WebSocketLike,
   WebSocketProviderComponent,
   WebSocketProviderFn,
 } from './types/index.js';
@@ -52,6 +53,7 @@ export class WebSocketGateway<T extends Event = Event>
   #eventExtractor: EventExtractorFn<T>;
   #webSocketProvider: WebSocketProviderFn;
   #messageHandler: (messageEvent: MessageEvent) => Promise<void>;
+  #ws: WebSocketLike | null = null;
 
   constructor(opts: WebSocketGatewayOptions<T>) {
     super(opts);
@@ -64,16 +66,16 @@ export class WebSocketGateway<T extends Event = Event>
     this.#messageHandler = this.#handleMessage.bind(this);
   }
 
-  /** Attach the message listener to the WebSocket. */
+  /** Resolve and cache the WebSocket, then attach the message listener. */
   async start(): Promise<void> {
-    const ws = await this.#webSocketProvider();
-    ws.addEventListener('message', this.#messageHandler);
+    this.#ws = await this.#webSocketProvider();
+    this.#ws.addEventListener('message', this.#messageHandler);
   }
 
-  /** Detach the message listener from the WebSocket. */
+  /** Detach the message listener from the cached WebSocket and release it. */
   async stop(): Promise<void> {
-    const ws = await this.#webSocketProvider();
-    ws.removeEventListener('message', this.#messageHandler);
+    this.#ws?.removeEventListener('message', this.#messageHandler);
+    this.#ws = null;
   }
 
   async #handleMessage(messageEvent: MessageEvent): Promise<void> {
