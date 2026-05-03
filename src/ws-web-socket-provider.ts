@@ -1,39 +1,116 @@
+import {
+  HeadersProviderComponent,
+  HeadersProviderFn,
+  getComponent,
+} from '@sektek/utility-belt';
+import { type HeadersInit } from 'undici-types';
 import { WebSocket } from 'ws';
 
 import { WebSocketLike } from './types/index.js';
 
 /** Options for `WsWebSocketProvider`. */
 type WsWebSocketProviderOptions = {
+  /**
+   * Provider called before each new connection to supply HTTP upgrade request
+   * headers (e.g. `Authorization`). Called fresh on every reconnect so tokens
+   * are always up-to-date.
+   *
+   * Note: the native browser `WebSocket` API does not support custom request
+   * headers. Use this option only with `WsWebSocketProvider` (Node.js).
+   */
+  headersProvider?: HeadersProviderComponent;
   /** URL to connect to. */
   url: string;
 };
 
 /**
+ * Converts a `HeadersInit` value to the plain string record that `ws` expects.
+ *
+ * @param init - The headers to convert.
+ * @returns A plain `Record<string, string>`.
+ */
+function toHeadersRecord(init: HeadersInit): Record<string, string> {
+  if (init instanceof Headers) {
+    const result: Record<string, string> = {};
+    init.forEach((value, name) => {
+      result[name] = value;
+    });
+    return result;
+  }
+
+  if (Array.isArray(init)) {
+    return Object.fromEntries(init);
+  }
+
+  const result: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(init)) {
+    result[name] = Array.isArray(value) ? value.join(', ') : (value as string);
+  }
+
+  return result;
+}
+
+/**
  * Node.js WebSocket provider backed by the `ws` package.
  *
  * Lazily opens a single connection on the first `get()` call and nulls it on
- * close, so the next `get()` reconnects automatically.
+ * close, so the next `get()` reconnects automatically. If a `headersProvider`
+ * is configured it is awaited before every new connection, ensuring tokens are
+ * always fresh on reconnect.
  */
 export class WsWebSocketProvider {
   #ws: WebSocket | null = null;
+  #pending: Promise<WebSocket> | null = null;
   #url: string;
+  #headersProvider: HeadersProviderFn | undefined;
 
   constructor(opts: WsWebSocketProviderOptions) {
     this.#url = opts.url;
+    this.#headersProvider = opts.headersProvider
+      ? getComponent(opts.headersProvider, 'get')
+      : undefined;
   }
 
   /**
    * Open (or reuse) the underlying `ws.WebSocket` and return it as `WebSocketLike`.
    *
+   * Concurrent calls while a connection is being established all share the same
+   * in-flight promise so only one socket is ever created.
+   *
    * @returns The active `WebSocketLike` connection.
    */
-  get(): WebSocketLike {
-    if (!this.#ws) {
-      this.#ws = new WebSocket(this.#url);
-      this.#ws.on('close', () => {
-        this.#ws = null;
-      });
+  async get(): Promise<WebSocketLike> {
+    if (this.#ws) return this.#ws as unknown as WebSocketLike;
+
+    if (!this.#pending) {
+      this.#pending = (async () => {
+        try {
+          return await this.#createSocket();
+        } catch (err) {
+          this.#pending = null;
+          throw err;
+        }
+      })();
     }
-    return this.#ws as unknown as WebSocketLike;
+
+    return this.#pending as Promise<WebSocketLike>;
+  }
+
+  async #createSocket(): Promise<WebSocket> {
+    const headersInit = this.#headersProvider
+      ? await this.#headersProvider()
+      : undefined;
+
+    const headers = headersInit ? toHeadersRecord(headersInit) : undefined;
+    const ws = new WebSocket(this.#url, headers ? { headers } : undefined);
+
+    ws.on('close', () => {
+      this.#ws = null;
+      this.#pending = null;
+    });
+
+    this.#ws = ws;
+    return ws;
   }
 }
