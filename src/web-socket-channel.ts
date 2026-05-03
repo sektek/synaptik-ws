@@ -48,8 +48,8 @@ export type WebSocketChannelOptions<T extends Event = Event> =
   EventComponentOptions & {
     /** Serializer applied before `ws.send`. Defaults to `JSON.stringify`. */
     eventSerializer?: EventSerializerComponent<T>;
-    /** Resolves the target `WebSocketLike` at send time. */
-    webSocketProvider: WebSocketProviderComponent;
+    /** Resolves the target `WebSocketLike` at send time, receiving the event as context. */
+    webSocketProvider: WebSocketProviderComponent<T>;
   };
 
 /**
@@ -65,7 +65,7 @@ export class WebSocketChannel<T extends Event = Event>
   implements EventEmittingService<EventChannelEvents<T>>
 {
   #eventSerializer: EventSerializerFn<T>;
-  #webSocketProvider: WebSocketProviderFn;
+  #webSocketProvider: WebSocketProviderFn<T>;
 
   constructor(opts: WebSocketChannelOptions<T>) {
     super(opts);
@@ -85,7 +85,7 @@ export class WebSocketChannel<T extends Event = Event>
     this.emit(EVENT_RECEIVED, event);
 
     try {
-      const ws = await this.#webSocketProvider();
+      const ws = await this.#webSocketProvider(event);
       const data = await this.#eventSerializer(event);
       ws.send(data);
       this.emit(EVENT_DELIVERED, event);
