@@ -1,6 +1,8 @@
 import {
   HeadersProviderComponent,
   HeadersProviderFn,
+  UrlProviderComponent,
+  UrlProviderFn,
   getComponent,
 } from '@sektek/utility-belt';
 import { type HeadersInit } from 'undici-types';
@@ -19,8 +21,16 @@ type WsWebSocketProviderOptions = {
    * headers. Use this option only with `WsWebSocketProvider` (Node.js).
    */
   headersProvider?: HeadersProviderComponent;
-  /** URL to connect to. */
-  url: string;
+  /**
+   * Static URL to connect to. Ignored if `urlProvider` is also supplied.
+   */
+  url?: string;
+  /**
+   * Provider that resolves the WebSocket URL before each new connection.
+   * Called fresh on every reconnect, so session URLs and signed tokens
+   * embedded in the URL are always current. Takes precedence over `url`.
+   */
+  urlProvider?: UrlProviderComponent<void>;
 };
 
 /**
@@ -55,18 +65,23 @@ function toHeadersRecord(init: HeadersInit): Record<string, string> {
  * Node.js WebSocket provider backed by the `ws` package.
  *
  * Lazily opens a single connection on the first `get()` call and nulls it on
- * close, so the next `get()` reconnects automatically. If a `headersProvider`
- * is configured it is awaited before every new connection, ensuring tokens are
- * always fresh on reconnect.
+ * close, so the next `get()` reconnects automatically. Both `urlProvider` and
+ * `headersProvider` are called fresh on every new connection so session URLs
+ * and auth tokens are always current.
  */
 export class WsWebSocketProvider {
   #ws: WebSocket | null = null;
   #pending: Promise<WebSocket> | null = null;
-  #url: string;
+  #urlProvider: UrlProviderFn<void>;
   #headersProvider: HeadersProviderFn | undefined;
 
   constructor(opts: WsWebSocketProviderOptions) {
-    this.#url = opts.url;
+    if (!opts.urlProvider && !opts.url) {
+      throw new Error('Must provide either urlProvider or url');
+    }
+    this.#urlProvider = getComponent(opts.urlProvider, 'get', {
+      default: () => opts.url!,
+    });
     this.#headersProvider = opts.headersProvider
       ? getComponent(opts.headersProvider, 'get')
       : undefined;
@@ -98,12 +113,16 @@ export class WsWebSocketProvider {
   }
 
   async #createSocket(): Promise<WebSocket> {
-    const headersInit = this.#headersProvider
-      ? await this.#headersProvider()
-      : undefined;
+    const [url, headersInit] = await Promise.all([
+      this.#urlProvider(),
+      this.#headersProvider ? this.#headersProvider() : undefined,
+    ]);
 
     const headers = headersInit ? toHeadersRecord(headersInit) : undefined;
-    const ws = new WebSocket(this.#url, headers ? { headers } : undefined);
+    const ws = new WebSocket(
+      url as string | URL,
+      headers ? { headers } : undefined,
+    );
 
     ws.on('close', () => {
       this.#ws = null;

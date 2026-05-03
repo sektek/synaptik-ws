@@ -32,10 +32,10 @@ describe('NativeWebSocketProvider', function () {
       url: `ws://localhost:${result.port}`,
     });
 
-    provider.get();
+    await provider.get();
     await new Promise(resolve => wss.once('connection', resolve));
 
-    expect(provider.get().readyState).to.be.oneOf([0, 1]);
+    expect((await provider.get()).readyState).to.be.oneOf([0, 1]);
   });
 
   it('get() returns the same instance on repeated calls', async function () {
@@ -46,8 +46,8 @@ describe('NativeWebSocketProvider', function () {
       url: `ws://localhost:${result.port}`,
     });
 
-    const ws1 = provider.get();
-    const ws2 = provider.get();
+    const ws1 = await provider.get();
+    const ws2 = await provider.get();
     await new Promise(resolve => wss.once('connection', resolve));
 
     expect(ws1).to.equal(ws2);
@@ -61,7 +61,7 @@ describe('NativeWebSocketProvider', function () {
       url: `ws://localhost:${result.port}`,
     });
 
-    const ws1 = provider.get() as globalThis.WebSocket;
+    const ws1 = (await provider.get()) as globalThis.WebSocket;
     await new Promise<void>(resolve =>
       ws1.addEventListener('open', () => resolve()),
     );
@@ -69,9 +69,36 @@ describe('NativeWebSocketProvider', function () {
     ws1.close();
     await wait(50);
 
-    const ws2 = provider.get();
+    const ws2 = await provider.get();
     await new Promise(resolve => wss.once('connection', resolve));
 
     expect(ws2).to.not.equal(ws1);
+  });
+
+  it('calls urlProvider fresh on each new connection', async function () {
+    const result = await startServer();
+    wss = result.wss;
+
+    let callCount = 0;
+    const provider = new NativeWebSocketProvider({
+      urlProvider: () => {
+        callCount++;
+        return `ws://localhost:${result.port}`;
+      },
+    });
+
+    const ws1 = (await provider.get()) as globalThis.WebSocket;
+    await new Promise<void>(resolve =>
+      ws1.addEventListener('open', () => resolve()),
+    );
+    expect(callCount).to.equal(1);
+
+    ws1.close();
+    await wait(50);
+
+    await provider.get();
+    await new Promise(resolve => wss.once('connection', resolve));
+
+    expect(callCount).to.equal(2);
   });
 });

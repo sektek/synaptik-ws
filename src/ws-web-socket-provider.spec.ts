@@ -75,6 +75,31 @@ describe('WsWebSocketProvider', function () {
     expect(ws2).to.not.equal(ws1);
   });
 
+  it('calls urlProvider fresh on each new connection', async function () {
+    const result = await startServer();
+    wss = result.wss;
+
+    let callCount = 0;
+    const provider = new WsWebSocketProvider({
+      urlProvider: () => {
+        callCount++;
+        return `ws://localhost:${result.port}`;
+      },
+    });
+
+    const ws1 = (await provider.get()) as unknown as WebSocket;
+    await new Promise<void>(resolve => ws1.once('open', resolve));
+    expect(callCount).to.equal(1);
+
+    ws1.close();
+    await wait(50);
+
+    await provider.get();
+    await new Promise(resolve => wss.once('connection', resolve));
+
+    expect(callCount).to.equal(2);
+  });
+
   it('sends headersProvider headers on the WebSocket upgrade request', async function () {
     const result = await startServer();
     wss = result.wss;
