@@ -247,24 +247,91 @@ describe('WebSocketGateway', function () {
     );
   });
 
-  it('emits EVENT_ERROR when a Buffer[] payload exceeds maxPayloadSize', async function () {
-    const ws = makeFakeWs();
+  it('emits EVENT_ERROR when an ArrayBufferView (Buffer) payload exceeds maxPayloadSize', async function () {
+    const result = await startServer();
+    wss = result.wss;
     const onError = sinon.stub();
 
-    const gateway = new WebSocketGateway({
-      webSocketProvider: () => ws,
-      handler: sinon.stub().resolves(),
-      maxPayloadSize: 4,
+    const connectionDone = new Promise<void>(resolve => {
+      wss!.once('connection', async serverWs => {
+        const gateway = new WebSocketGateway({
+          webSocketProvider: () => serverWs as unknown as WebSocket,
+          handler: sinon.stub().resolves(),
+          maxPayloadSize: 4,
+        });
+        gateway.on(EVENT_ERROR, onError);
+        await gateway.start();
+        resolve();
+      });
     });
-    gateway.on(EVENT_ERROR, onError);
-    await gateway.start();
 
-    const messageHandler = (ws.addEventListener as sinon.SinonStub)
-      .getCalls()
-      .find(c => c.args[0] === 'message')?.args[1] as (e: MessageEvent) => void;
+    clientWs = await connectClient(result.port);
+    await connectionDone;
 
-    const chunks = [Buffer.from('hello'), Buffer.from('world')];
-    await messageHandler({ data: chunks } as unknown as MessageEvent);
+    clientWs.send(Buffer.alloc(5));
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(onError.calledOnce).to.be.true;
+    expect((onError.firstCall.args[0] as Error).message).to.match(
+      /maxPayloadSize/,
+    );
+  });
+
+  it('emits EVENT_ERROR when an ArrayBuffer payload exceeds maxPayloadSize', async function () {
+    const result = await startServer();
+    wss = result.wss;
+    const onError = sinon.stub();
+
+    const connectionDone = new Promise<void>(resolve => {
+      wss!.once('connection', async serverWs => {
+        (serverWs as WebSocket).binaryType = 'arraybuffer';
+        const gateway = new WebSocketGateway({
+          webSocketProvider: () => serverWs as unknown as WebSocket,
+          handler: sinon.stub().resolves(),
+          maxPayloadSize: 4,
+        });
+        gateway.on(EVENT_ERROR, onError);
+        await gateway.start();
+        resolve();
+      });
+    });
+
+    clientWs = await connectClient(result.port);
+    await connectionDone;
+
+    clientWs.send(Buffer.alloc(5));
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(onError.calledOnce).to.be.true;
+    expect((onError.firstCall.args[0] as Error).message).to.match(
+      /maxPayloadSize/,
+    );
+  });
+
+  it('emits EVENT_ERROR when a Buffer[] payload exceeds maxPayloadSize', async function () {
+    const result = await startServer();
+    wss = result.wss;
+    const onError = sinon.stub();
+
+    const connectionDone = new Promise<void>(resolve => {
+      wss!.once('connection', async serverWs => {
+        (serverWs as WebSocket).binaryType = 'fragments';
+        const gateway = new WebSocketGateway({
+          webSocketProvider: () => serverWs as unknown as WebSocket,
+          handler: sinon.stub().resolves(),
+          maxPayloadSize: 4,
+        });
+        gateway.on(EVENT_ERROR, onError);
+        await gateway.start();
+        resolve();
+      });
+    });
+
+    clientWs = await connectClient(result.port);
+    await connectionDone;
+
+    clientWs.send(Buffer.alloc(5));
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(onError.calledOnce).to.be.true;
     expect((onError.firstCall.args[0] as Error).message).to.match(
@@ -289,6 +356,32 @@ describe('WebSocketGateway', function () {
       .find(c => c.args[0] === 'message')?.args[1] as (e: MessageEvent) => void;
 
     await messageHandler({ data: 42 } as unknown as MessageEvent);
+
+    expect(onError.calledOnce).to.be.true;
+    expect((onError.firstCall.args[0] as Error).message).to.match(
+      /maxPayloadSize/,
+    );
+  });
+
+  it('emits EVENT_ERROR when a Blob payload exceeds maxPayloadSize', async function () {
+    const ws = makeFakeWs();
+    const onError = sinon.stub();
+
+    const gateway = new WebSocketGateway({
+      webSocketProvider: () => ws,
+      handler: sinon.stub().resolves(),
+      maxPayloadSize: 4,
+    });
+    gateway.on(EVENT_ERROR, onError);
+    await gateway.start();
+
+    const messageHandler = (ws.addEventListener as sinon.SinonStub)
+      .getCalls()
+      .find(c => c.args[0] === 'message')?.args[1] as (e: MessageEvent) => void;
+
+    await messageHandler({
+      data: new Blob(['hello']),
+    } as unknown as MessageEvent);
 
     expect(onError.calledOnce).to.be.true;
     expect((onError.firstCall.args[0] as Error).message).to.match(
