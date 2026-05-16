@@ -137,7 +137,10 @@ export class WebSocketGateway<T extends Event = Event>
   }
 
   #handleClose(): void {
+    const ws = this.#ws;
     this.#ws = null;
+    ws?.removeEventListener('message', this.#messageHandler);
+    ws?.removeEventListener('close', this.#closeHandler);
     this.emit(CONNECTION_CLOSED);
     if (this.#started && this.#autoRestart) {
       (async () => {
@@ -171,7 +174,7 @@ export class WebSocketGateway<T extends Event = Event>
   }
 
   #measurePayload(data: MessageEvent['data']): number {
-    if (typeof data === 'string') return data.length;
+    if (typeof data === 'string') return Buffer.byteLength(data, 'utf8');
     if (data instanceof ArrayBuffer) return data.byteLength;
     if (ArrayBuffer.isView(data)) return data.byteLength;
     if (typeof Blob !== 'undefined' && data instanceof Blob) return data.size;
