@@ -70,7 +70,7 @@ export class WsWebSocketProvider implements WebSocketProvider {
   #ws: WebSocket | null = null;
   #pending: Promise<WebSocket> | null = null;
   #urlProvider: UrlProviderFn<void>;
-  #headersProvider: HeadersProviderFn | undefined;
+  #headersProvider: HeadersProviderFn;
 
   constructor(opts: WsWebSocketProviderOptions) {
     if (!opts.urlProvider && !opts.url) {
@@ -79,9 +79,9 @@ export class WsWebSocketProvider implements WebSocketProvider {
     this.#urlProvider = getComponent(opts.urlProvider, 'get', {
       default: () => opts.url!,
     });
-    this.#headersProvider = opts.headersProvider
-      ? getComponent(opts.headersProvider, 'get')
-      : undefined;
+    this.#headersProvider = getComponent(opts.headersProvider, 'get', {
+      default: () => undefined,
+    });
   }
 
   /**
@@ -112,7 +112,7 @@ export class WsWebSocketProvider implements WebSocketProvider {
   async #createSocket(): Promise<WebSocket> {
     const [url, headersInit] = await Promise.all([
       this.#urlProvider(),
-      this.#headersProvider ? this.#headersProvider() : undefined,
+      this.#headersProvider(),
     ]);
 
     const headers = headersInit ? toHeadersRecord(headersInit) : undefined;
