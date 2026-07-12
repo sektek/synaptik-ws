@@ -13,14 +13,14 @@ import {
 import { EventEmittingService, getComponent } from '@sektek/utility-belt';
 
 import {
-  EventExtractorComponent,
-  EventExtractorFn,
+  EventDeserializerComponent,
+  EventDeserializerFn,
   WebSocketLike,
   WebSocketProviderComponent,
   WebSocketProviderFn,
 } from './types/index.js';
 import { CONNECTION_CLOSED } from './events.js';
-import { defaultEventExtractor } from './default-event-extractor.js';
+import { defaultEventDeserializer } from './default-event-deserializer.js';
 
 /** Default maximum inbound message size (100 KB). */
 export const DEFAULT_MAX_PAYLOAD_SIZE = 100 * 1024;
@@ -28,7 +28,7 @@ export const DEFAULT_MAX_PAYLOAD_SIZE = 100 * 1024;
 /**
  * Events emitted by `WebSocketGateway`.
  *
- * @template T The event type produced by the extractor.
+ * @template T The event type produced by the deserializer.
  */
 export type WebSocketGatewayEvents<T extends Event = Event> =
   EventHandlerEvents<T> & {
@@ -39,7 +39,7 @@ export type WebSocketGatewayEvents<T extends Event = Event> =
 /**
  * Options for constructing a `WebSocketGateway`.
  *
- * @template T The event type produced by the extractor.
+ * @template T The event type produced by the deserializer.
  */
 export type WebSocketGatewayOptions<T extends Event = Event> =
   EventComponentOptions & {
@@ -50,12 +50,12 @@ export type WebSocketGatewayOptions<T extends Event = Event> =
      * Defaults to `false`.
      */
     autoRestart?: boolean;
-    /** Extracts events from raw WebSocket messages. Defaults to `defaultEventExtractor`. */
-    eventExtractor?: EventExtractorComponent<T>;
-    /** Downstream handler that processes each extracted event. */
+    /** Deserializes events from raw WebSocket messages. Defaults to `defaultEventDeserializer`. */
+    eventDeserializer?: EventDeserializerComponent<T>;
+    /** Downstream handler that processes each deserialized event. */
     handler: EventEndpointComponent<T>;
     /**
-     * Maximum inbound message size in bytes before extraction is attempted.
+     * Maximum inbound message size in bytes before deserialization is attempted.
      * Messages exceeding this limit are rejected with an `EVENT_ERROR`.
      * Defaults to `DEFAULT_MAX_PAYLOAD_SIZE` (100 KB).
      */
@@ -66,12 +66,12 @@ export type WebSocketGatewayOptions<T extends Event = Event> =
 
 /**
  * Listens on a WebSocket connection and dispatches each incoming message to a
- * handler after extracting it into a typed event.
+ * handler after deserializing it into a typed event.
  *
  * Call `start()` to attach the message listener and `stop()` to detach it.
  * Emits `EVENT_RECEIVED`, `EVENT_PROCESSED`, and `EVENT_ERROR` lifecycle events.
  *
- * @template T The event type produced by the extractor.
+ * @template T The event type produced by the deserializer.
  */
 export class WebSocketGateway<T extends Event = Event>
   extends AbstractEventComponent
@@ -79,7 +79,7 @@ export class WebSocketGateway<T extends Event = Event>
 {
   #autoRestart: boolean;
   #handler: EventHandlerFn<T>;
-  #eventExtractor: EventExtractorFn<T>;
+  #eventDeserializer: EventDeserializerFn<T>;
   #generation = 0;
   #maxPayloadSize: number;
   #started = false;
@@ -91,10 +91,14 @@ export class WebSocketGateway<T extends Event = Event>
   constructor(opts: WebSocketGatewayOptions<T>) {
     super(opts);
     this.#webSocketProvider = getComponent(opts.webSocketProvider, 'get');
-    this.#eventExtractor = getComponent(opts.eventExtractor, 'extract', {
-      name: 'eventExtractor',
-      default: defaultEventExtractor as EventExtractorFn<T>,
-    });
+    this.#eventDeserializer = getComponent(
+      opts.eventDeserializer,
+      'deserialize',
+      {
+        name: 'eventDeserializer',
+        default: defaultEventDeserializer as EventDeserializerFn<T>,
+      },
+    );
     this.#handler = getEventHandlerComponent(opts.handler);
     this.#autoRestart = opts.autoRestart ?? false;
     this.#maxPayloadSize = opts.maxPayloadSize ?? DEFAULT_MAX_PAYLOAD_SIZE;
@@ -164,7 +168,7 @@ export class WebSocketGateway<T extends Event = Event>
         );
       }
 
-      event = await this.#eventExtractor(messageEvent);
+      event = await this.#eventDeserializer(messageEvent);
       this.emit(EVENT_RECEIVED, event);
       await this.#handler(event);
       this.emit(EVENT_PROCESSED, event);

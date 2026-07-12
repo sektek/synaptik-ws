@@ -1,4 +1,4 @@
-export * from './default-event-extractor.js';
+export * from './default-event-deserializer.js';
 export * from './events.js';
 export * from './native-web-socket-provider.js';
 export * from './types/index.js';
