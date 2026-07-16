@@ -9,6 +9,10 @@
   },
   "license": "MIT",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./ws": "./dist/src/ws-web-socket-provider.js"
+  },
   "type": "module",
   "scripts": {
     "build": "npx tsc -p tsconfig.build.json",
