@@ -168,6 +168,36 @@ const provider = new WsWebSocketProvider({
 
 Headers can be a plain object, a `Headers` instance or an array of pairs.
 
+#### Socket errors
+
+Neither the provider, the channel nor the gateway listens for the socket's
+`error` event. With `ws`, an `error` event that nobody listens to is thrown as an
+uncaught exception, which crashes the process. A failed connection, such as the
+server being unreachable, is enough to trigger it. Listen for `error` on each
+socket by wrapping the provider:
+
+```ts
+const inner = new WsWebSocketProvider({ url: 'wss://example.com/chat' });
+const watched = new WeakSet<object>();
+
+const provider = async () => {
+  const socket = await inner.get();
+
+  if (!watched.has(socket)) {
+    watched.add(socket);
+    (socket as WebSocket).addEventListener('error', () => {
+      console.error('socket error');
+    });
+  }
+
+  return socket;
+};
+```
+
+Pass `provider` as the `webSocketProvider` of the channel and the gateway. The
+browser `WebSocket` doesn't throw on unhandled errors, but it is still worth
+listening for them.
+
 ### Reconnecting
 
 Providers reconnect lazily: nothing happens when a socket closes, and the next
@@ -275,8 +305,8 @@ detach them. `stop()` doesn't close the socket, and calling `start()` again
 re-attaches. If `stop()` is called while `start()` is still waiting on the
 provider, the pending `start()` is abandoned and nothing is attached.
 
-Errors never escape the gateway. A message that is too large, can't be
-deserialized, or makes the handler throw is reported as an `event:error`, and
+Errors from inbound messages never escape the gateway. A message that is too
+large, can't be deserialized, or makes the handler throw is reported as an `event:error`, and
 the gateway carries on with the next message. The event argument of
 `event:error` is `undefined` when the failure happened before the message
 became an event, so listen for it:
@@ -303,8 +333,9 @@ const gateway = new WebSocketGateway({
 
 The limit is checked after the socket has received the whole message, so it
 protects the deserializer and your handler, not the process's memory. To cap the
-size at the transport, configure the socket library too (for `ws`, the
-`maxPayload` option).
+size at the transport, configure the socket library too, for example the
+`maxPayload` option of a `ws` `WebSocketServer`. `WsWebSocketProvider` doesn't
+pass socket options through, other than headers.
 
 ### Reconnecting automatically
 
@@ -321,9 +352,28 @@ const gateway = new WebSocketGateway({
 await gateway.start();
 ```
 
-There is no delay or retry limit. If reconnecting fails, `event:error` is
-emitted and the gateway stays down until you call `start()` yourself. For
-backoff, build it into the provider, for example in `urlProvider`.
+There is no delay or retry limit. A socket that closes is replaced immediately,
+so if the server is down the gateway retries in a tight loop, many times a
+second. If reconnecting fails outright, `event:error` is emitted and the gateway
+stays down until you call `start()` yourself. Add a delay in the provider, which
+`start()` waits for:
+
+```ts
+import { setTimeout as delay } from 'node:timers/promises';
+
+let attempts = 0;
+
+const provider = new WsWebSocketProvider({
+  urlProvider: async () => {
+    if (attempts++ > 0) await delay(1000);
+
+    return 'wss://example.com/chat';
+  },
+});
+```
+
+With `ws`, also handle [socket errors](#socket-errors), or a failed connection
+will crash the process before the gateway can retry.
 
 ## Serialization
 
