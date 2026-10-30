@@ -10,7 +10,12 @@ import {
   EventHandlerFn,
   getEventHandlerComponent,
 } from '@sektek/synaptik';
-import { EventEmittingService, getComponent } from '@sektek/utility-belt';
+import {
+  EventEmittingService,
+  ProviderComponent,
+  ProviderFn,
+  getComponent,
+} from '@sektek/utility-belt';
 
 import {
   EventDeserializerComponent,
@@ -24,6 +29,9 @@ import { defaultEventDeserializer } from './default-event-deserializer.js';
 
 /** Default maximum inbound message size (100 KB). */
 export const DEFAULT_MAX_PAYLOAD_SIZE = 100 * 1024;
+
+/** Default delay before an automatic restart, in milliseconds (restart immediately). */
+export const DEFAULT_RESTART_DELAY = 0;
 
 /**
  * Events emitted by `WebSocketGateway`.
@@ -60,6 +68,24 @@ export type WebSocketGatewayOptions<T extends Event = Event> =
      * Defaults to `DEFAULT_MAX_PAYLOAD_SIZE` (100 KB).
      */
     maxPayloadSize?: number;
+    /**
+     * Milliseconds to wait before each automatic restart. Calling `stop()`
+     * cancels a pending delay. Ignored when `restartDelayProvider` is set.
+     *
+     * Setting either this or `restartDelayProvider` also makes a restart that
+     * fails get reported with `EVENT_ERROR` and retried after the next delay.
+     * Without either, a failed restart is reported and the gateway stays
+     * stopped.
+     * Defaults to `DEFAULT_RESTART_DELAY` (restart immediately).
+     */
+    restartDelay?: number;
+    /**
+     * Resolves the milliseconds to wait before each automatic restart. It is
+     * given the `attempt`: the number of consecutive failed restarts so far
+     * (`0` for the first restart after a close), which resets once a
+     * connection opens. Takes precedence over `restartDelay`.
+     */
+    restartDelayProvider?: ProviderComponent<number, number>;
     /** Resolves the `WebSocketLike` to listen on. */
     webSocketProvider: WebSocketProviderComponent;
   };
@@ -82,6 +108,9 @@ export class WebSocketGateway<T extends Event = Event>
   #eventDeserializer: EventDeserializerFn<T>;
   #generation = 0;
   #maxPayloadSize: number;
+  #restartAttempt = 0;
+  #restartDelayProvider: ProviderFn<number, number>;
+  #retryFailedRestarts: boolean;
   #started = false;
   #webSocketProvider: WebSocketProviderFn;
   #closeHandler: () => void;
@@ -102,6 +131,17 @@ export class WebSocketGateway<T extends Event = Event>
     this.#handler = getEventHandlerComponent(opts.handler);
     this.#autoRestart = opts.autoRestart ?? false;
     this.#maxPayloadSize = opts.maxPayloadSize ?? DEFAULT_MAX_PAYLOAD_SIZE;
+    this.#restartDelayProvider = getComponent(
+      opts.restartDelayProvider,
+      'get',
+      {
+        name: 'restartDelayProvider',
+        default: () => opts.restartDelay ?? DEFAULT_RESTART_DELAY,
+      },
+    );
+    this.#retryFailedRestarts =
+      opts.restartDelay !== undefined ||
+      opts.restartDelayProvider !== undefined;
     this.#closeHandler = this.#handleClose.bind(this);
     this.#messageHandler = this.#handleMessage.bind(this);
   }
@@ -121,6 +161,7 @@ export class WebSocketGateway<T extends Event = Event>
     const gen = ++this.#generation;
     const ws = await this.#webSocketProvider();
     if (gen !== this.#generation) return;
+    this.#restartAttempt = 0;
     this.#ws = ws;
     this.#ws.addEventListener('message', this.#messageHandler);
     this.#ws.addEventListener('close', this.#closeHandler);
@@ -147,13 +188,37 @@ export class WebSocketGateway<T extends Event = Event>
     ws?.removeEventListener('close', this.#closeHandler);
     this.emit(CONNECTION_CLOSED);
     if (this.#started && this.#autoRestart) {
-      (async () => {
-        try {
-          await this.start();
-        } catch (err) {
-          this.emit(EVENT_ERROR, err, undefined);
+      this.#restart();
+    }
+  }
+
+  async #restart(): Promise<void> {
+    for (;;) {
+      const gen = this.#generation;
+
+      try {
+        const delayMs = await this.#restartDelayProvider(this.#restartAttempt);
+
+        if (delayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
         }
-      })();
+
+        if (gen !== this.#generation) return;
+
+        await this.start();
+        return;
+      } catch (err) {
+        this.emit(EVENT_ERROR, err, undefined);
+
+        const canRetry =
+          this.#retryFailedRestarts &&
+          this.#started &&
+          gen + 1 === this.#generation;
+
+        if (!canRetry) return;
+
+        this.#restartAttempt++;
+      }
     }
   }
 

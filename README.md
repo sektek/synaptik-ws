@@ -316,25 +316,28 @@ const gateway = new WebSocketGateway({
 await gateway.start();
 ```
 
-There is no delay or retry limit. A socket that closes is replaced immediately,
-so if the server is down the gateway retries in a tight loop, many times a
-second. If reconnecting fails outright, `event:error` is emitted and the gateway
-stays down until you call `start()` yourself. Add a delay in the provider, which
-`start()` waits for:
+By default a socket that closes is replaced immediately, so if the server is
+down the gateway can retry in a tight loop. Set `restartDelay` to a number of
+milliseconds, or `restartDelayProvider` to a function of the restart `attempt`,
+to space restarts out:
 
 ```ts
-import { setTimeout as delay } from 'node:timers/promises';
-
-let attempts = 0;
-
-const provider = new WsWebSocketProvider({
-  urlProvider: async () => {
-    if (attempts++ > 0) await delay(1000);
-
-    return 'wss://example.com/chat';
-  },
+const gateway = new WebSocketGateway({
+  webSocketProvider: provider,
+  handler,
+  autoRestart: true,
+  // 1s, 2s, 4s, ... capped at 30s
+  restartDelayProvider: attempt => Math.min(1000 * 2 ** attempt, 30_000),
 });
 ```
+
+`attempt` is the number of consecutive failed restarts, so it is `0` for the
+first restart after a close, and it resets once a connection opens.
+`restartDelayProvider` takes precedence over `restartDelay`. When either is
+set, a restart that fails is reported with `event:error` and
+retried after the next delay. Without one, a failed restart is reported and the
+gateway stays down until you call `start()` yourself. There is no retry limit,
+and `stop()` cancels a pending delay.
 
 With `ws`, also handle [socket errors](#socket-errors), or a failed connection
 will crash the process before the gateway can retry.
