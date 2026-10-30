@@ -499,4 +499,185 @@ describe('WebSocketGateway', function () {
 
     expect(ws2.addEventListener as sinon.SinonStub).not.to.have.been.called;
   });
+
+  describe('restartDelay', function () {
+    let clock: sinon.SinonFakeTimers;
+
+    const closeHandlerOf = (ws: WebSocketLike): (() => void) =>
+      (ws.addEventListener as sinon.SinonStub)
+        .getCalls()
+        .reverse()
+        .find(c => c.args[0] === 'close')?.args[1] as () => void;
+
+    class ScriptedProvider {
+      calls = 0;
+      readonly #script: Array<WebSocketLike | Error>;
+
+      constructor(...script: Array<WebSocketLike | Error>) {
+        this.#script = script;
+      }
+
+      get handler(): () => Promise<WebSocketLike> {
+        return this.fetch.bind(this);
+      }
+
+      async fetch(): Promise<WebSocketLike> {
+        const next = this.#script[this.calls++] ?? makeFakeWs();
+
+        if (next instanceof Error) throw next;
+
+        return next;
+      }
+    }
+
+    beforeEach(function () {
+      clock = sinon.useFakeTimers();
+    });
+
+    afterEach(function () {
+      clock.restore();
+    });
+
+    it('waits a numeric restartDelay before restarting', async function () {
+      const ws1 = makeFakeWs();
+      const provider = new ScriptedProvider(ws1);
+
+      const gateway = new WebSocketGateway({
+        webSocketProvider: provider.handler,
+        handler: sinon.stub().resolves(),
+        autoRestart: true,
+        restartDelay: 1000,
+      });
+
+      await gateway.start();
+      closeHandlerOf(ws1)();
+
+      await clock.tickAsync(999);
+      expect(provider.calls).to.equal(1);
+
+      await clock.tickAsync(1);
+      expect(provider.calls).to.equal(2);
+
+      await gateway.stop();
+    });
+
+    it('passes an increasing attempt to a function restartDelay and resets it after a connection opens', async function () {
+      const ws1 = makeFakeWs();
+      const ws2 = makeFakeWs();
+      const refused = new Error('refused');
+      const provider = new ScriptedProvider(ws1, refused, refused, ws2);
+      const restartDelay = sinon.stub().returns(10);
+      const onError = sinon.stub();
+
+      const gateway = new WebSocketGateway({
+        webSocketProvider: provider.handler,
+        handler: sinon.stub().resolves(),
+        autoRestart: true,
+        restartDelay,
+      });
+      gateway.on(EVENT_ERROR, onError);
+
+      await gateway.start();
+      closeHandlerOf(ws1)();
+      await clock.tickAsync(100);
+
+      expect(restartDelay.args.map(a => a[0])).to.deep.equal([0, 1, 2]);
+      expect(provider.calls).to.equal(4);
+      expect(onError).to.have.been.calledTwice;
+
+      closeHandlerOf(ws2)();
+      await clock.tickAsync(100);
+
+      expect(restartDelay.getCall(3).args[0]).to.equal(0);
+      expect(provider.calls).to.equal(5);
+
+      await gateway.stop();
+    });
+
+    it('accepts an asynchronous restartDelay function', async function () {
+      const ws1 = makeFakeWs();
+      const provider = new ScriptedProvider(ws1);
+
+      const gateway = new WebSocketGateway({
+        webSocketProvider: provider.handler,
+        handler: sinon.stub().resolves(),
+        autoRestart: true,
+        restartDelay: async () => 500,
+      });
+
+      await gateway.start();
+      closeHandlerOf(ws1)();
+
+      await clock.tickAsync(499);
+      expect(provider.calls).to.equal(1);
+
+      await clock.tickAsync(1);
+      expect(provider.calls).to.equal(2);
+
+      await gateway.stop();
+    });
+
+    it('does not restart when stop() is called during the delay', async function () {
+      const ws1 = makeFakeWs();
+      const provider = new ScriptedProvider(ws1);
+
+      const gateway = new WebSocketGateway({
+        webSocketProvider: provider.handler,
+        handler: sinon.stub().resolves(),
+        autoRestart: true,
+        restartDelay: 1000,
+      });
+
+      await gateway.start();
+      closeHandlerOf(ws1)();
+
+      await clock.tickAsync(500);
+      await gateway.stop();
+      await clock.tickAsync(5000);
+
+      expect(provider.calls).to.equal(1);
+    });
+
+    it('restarts immediately when restartDelay is not set', async function () {
+      const ws1 = makeFakeWs();
+      const provider = new ScriptedProvider(ws1);
+
+      const gateway = new WebSocketGateway({
+        webSocketProvider: provider.handler,
+        handler: sinon.stub().resolves(),
+        autoRestart: true,
+      });
+
+      await gateway.start();
+      closeHandlerOf(ws1)();
+      await clock.tickAsync(0);
+
+      expect(provider.calls).to.equal(2);
+
+      await gateway.stop();
+    });
+
+    it('does not retry a failed restart when restartDelay is not set', async function () {
+      const ws1 = makeFakeWs();
+      const refused = new Error('refused');
+      const provider = new ScriptedProvider(ws1, refused, refused, refused);
+      const onError = sinon.stub();
+
+      const gateway = new WebSocketGateway({
+        webSocketProvider: provider.handler,
+        handler: sinon.stub().resolves(),
+        autoRestart: true,
+      });
+      gateway.on(EVENT_ERROR, onError);
+
+      await gateway.start();
+      closeHandlerOf(ws1)();
+      await clock.tickAsync(1000);
+
+      expect(provider.calls).to.equal(2);
+      expect(onError).to.have.been.calledOnce;
+
+      await gateway.stop();
+    });
+  });
 });

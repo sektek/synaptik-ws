@@ -60,6 +60,19 @@ export type WebSocketGatewayOptions<T extends Event = Event> =
      * Defaults to `DEFAULT_MAX_PAYLOAD_SIZE` (100 KB).
      */
     maxPayloadSize?: number;
+    /**
+     * Milliseconds to wait before each automatic restart, or a function that
+     * returns the delay for a given `attempt`. `attempt` is the number of
+     * consecutive failed restarts so far (`0` for the first restart after a
+     * close) and resets once a connection opens. Calling `stop()` cancels a
+     * pending delay.
+     *
+     * When set, a restart that fails is reported with `EVENT_ERROR` and then
+     * retried after the next delay. Without it, a failed restart is reported and
+     * the gateway stays stopped.
+     * Defaults to `0` (restart immediately).
+     */
+    restartDelay?: number | ((attempt: number) => number | PromiseLike<number>);
     /** Resolves the `WebSocketLike` to listen on. */
     webSocketProvider: WebSocketProviderComponent;
   };
@@ -82,6 +95,8 @@ export class WebSocketGateway<T extends Event = Event>
   #eventDeserializer: EventDeserializerFn<T>;
   #generation = 0;
   #maxPayloadSize: number;
+  #restartAttempt = 0;
+  #restartDelay: ((attempt: number) => number | PromiseLike<number>) | null;
   #started = false;
   #webSocketProvider: WebSocketProviderFn;
   #closeHandler: () => void;
@@ -102,6 +117,10 @@ export class WebSocketGateway<T extends Event = Event>
     this.#handler = getEventHandlerComponent(opts.handler);
     this.#autoRestart = opts.autoRestart ?? false;
     this.#maxPayloadSize = opts.maxPayloadSize ?? DEFAULT_MAX_PAYLOAD_SIZE;
+    this.#restartDelay =
+      typeof opts.restartDelay === 'number'
+        ? () => opts.restartDelay as number
+        : (opts.restartDelay ?? null);
     this.#closeHandler = this.#handleClose.bind(this);
     this.#messageHandler = this.#handleMessage.bind(this);
   }
@@ -121,6 +140,7 @@ export class WebSocketGateway<T extends Event = Event>
     const gen = ++this.#generation;
     const ws = await this.#webSocketProvider();
     if (gen !== this.#generation) return;
+    this.#restartAttempt = 0;
     this.#ws = ws;
     this.#ws.addEventListener('message', this.#messageHandler);
     this.#ws.addEventListener('close', this.#closeHandler);
@@ -147,13 +167,35 @@ export class WebSocketGateway<T extends Event = Event>
     ws?.removeEventListener('close', this.#closeHandler);
     this.emit(CONNECTION_CLOSED);
     if (this.#started && this.#autoRestart) {
-      (async () => {
-        try {
-          await this.start();
-        } catch (err) {
-          this.emit(EVENT_ERROR, err, undefined);
+      this.#restart();
+    }
+  }
+
+  async #restart(): Promise<void> {
+    for (;;) {
+      const gen = this.#generation;
+
+      try {
+        const delayMs = (await this.#restartDelay?.(this.#restartAttempt)) ?? 0;
+
+        if (delayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
         }
-      })();
+
+        if (gen !== this.#generation) return;
+
+        await this.start();
+        return;
+      } catch (err) {
+        this.emit(EVENT_ERROR, err, undefined);
+
+        const canRetry =
+          this.#restartDelay && this.#started && gen + 1 === this.#generation;
+
+        if (!canRetry) return;
+
+        this.#restartAttempt++;
+      }
     }
   }
 
