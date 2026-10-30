@@ -20,6 +20,9 @@ export interface WebSocketLike {
   /** Register a listener for the connection close event. */
   addEventListener(type: 'close', listener: () => void): void;
 
+  /** Register a listener for the connection open event. */
+  addEventListener(type: 'open', listener: () => void): void;
+
   /** Remove a previously registered message listener. */
   removeEventListener(
     type: 'message',
@@ -28,6 +31,9 @@ export interface WebSocketLike {
 
   /** Remove a previously registered close listener. */
   removeEventListener(type: 'close', listener: () => void): void;
+
+  /** Remove a previously registered open listener. */
+  removeEventListener(type: 'open', listener: () => void): void;
 
   /** Current connection state. See {@link WebSocketReadyState} for named values. */
   readonly readyState: number;

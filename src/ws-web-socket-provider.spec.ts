@@ -4,6 +4,8 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 
+import { WebSocketChannel } from './web-socket-channel.js';
+import { WebSocketReadyState } from './types/index.js';
 import { WsWebSocketProvider } from './ws-web-socket-provider.js';
 
 use(chaiAsPromised);
@@ -15,6 +17,12 @@ const startServer = (): Promise<{ wss: WebSocketServer; port: number }> =>
       resolve({ wss, port: addr.port });
     });
   });
+
+const closedPort = async (): Promise<number> => {
+  const { wss, port } = await startServer();
+  await new Promise(resolve => wss.close(resolve));
+  return port;
+};
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -35,9 +43,8 @@ describe('WsWebSocketProvider', function () {
     });
 
     const ws = await provider.get();
-    await new Promise(resolve => wss.once('connection', resolve));
 
-    expect(ws.readyState).to.be.oneOf([0, 1]);
+    expect(ws.readyState).to.equal(WebSocketReadyState.OPEN);
   });
 
   it('get() returns the same instance on repeated calls', async function () {
@@ -50,7 +57,6 @@ describe('WsWebSocketProvider', function () {
 
     const ws1 = await provider.get();
     const ws2 = await provider.get();
-    await new Promise(resolve => wss.once('connection', resolve));
 
     expect(ws1).to.equal(ws2);
   });
@@ -64,13 +70,11 @@ describe('WsWebSocketProvider', function () {
     });
 
     const ws1 = (await provider.get()) as unknown as WebSocket;
-    await new Promise<void>(resolve => ws1.once('open', resolve));
 
     ws1.close();
     await wait(50);
 
     const ws2 = (await provider.get()) as unknown as WebSocket;
-    await new Promise(resolve => wss.once('connection', resolve));
 
     expect(ws2).to.not.equal(ws1);
   });
@@ -88,14 +92,12 @@ describe('WsWebSocketProvider', function () {
     });
 
     const ws1 = (await provider.get()) as unknown as WebSocket;
-    await new Promise<void>(resolve => ws1.once('open', resolve));
     expect(callCount).to.equal(1);
 
     ws1.close();
     await wait(50);
 
     await provider.get();
-    await new Promise(resolve => wss.once('connection', resolve));
 
     expect(callCount).to.equal(2);
   });
@@ -133,7 +135,6 @@ describe('WsWebSocketProvider', function () {
       wss.once('connection', (_, req) => resolve(req)),
     );
     const ws1 = (await provider.get()) as unknown as WebSocket;
-    await new Promise<void>(resolve => ws1.once('open', resolve));
     expect((await firstReq).headers.authorization).to.equal('Bearer token-1');
 
     ws1.close();
@@ -144,5 +145,73 @@ describe('WsWebSocketProvider', function () {
     );
     await provider.get();
     expect((await secondReq).headers.authorization).to.equal('Bearer token-2');
+  });
+
+  it('shares one socket between concurrent get() calls', async function () {
+    const result = await startServer();
+    wss = result.wss;
+
+    const provider = new WsWebSocketProvider({
+      url: `ws://localhost:${result.port}`,
+    });
+
+    const [ws1, ws2] = await Promise.all([provider.get(), provider.get()]);
+
+    expect(ws1).to.equal(ws2);
+    expect(wss.clients.size).to.equal(1);
+  });
+
+  it('lets a channel send immediately after the first get()', async function () {
+    const result = await startServer();
+    wss = result.wss;
+
+    const received = new Promise<string>(resolve =>
+      wss.once('connection', ws =>
+        ws.once('message', data => resolve(data.toString())),
+      ),
+    );
+    const provider = new WsWebSocketProvider({
+      url: `ws://localhost:${result.port}`,
+    });
+    const channel = new WebSocketChannel({ webSocketProvider: provider });
+
+    await provider.get();
+    await channel.send({ type: 'test', id: '1', data: {} });
+
+    expect(JSON.parse(await received)).to.include({ id: '1' });
+  });
+
+  it('rejects get() when the connection is refused and retries on the next call', async function () {
+    const port = await closedPort();
+    let url = `ws://localhost:${port}`;
+    const provider = new WsWebSocketProvider({ urlProvider: () => url });
+
+    await expect(provider.get()).to.be.rejected;
+
+    const result = await startServer();
+    wss = result.wss;
+    url = `ws://localhost:${result.port}`;
+
+    expect((await provider.get()).readyState).to.equal(
+      WebSocketReadyState.OPEN,
+    );
+  });
+
+  it('opens a new socket when the cached one is closing', async function () {
+    const result = await startServer();
+    wss = result.wss;
+
+    const provider = new WsWebSocketProvider({
+      url: `ws://localhost:${result.port}`,
+    });
+
+    const ws1 = await provider.get();
+    ws1.close();
+    expect(ws1.readyState).to.equal(WebSocketReadyState.CLOSING);
+
+    const ws2 = await provider.get();
+
+    expect(ws2).to.not.equal(ws1);
+    expect(ws2.readyState).to.equal(WebSocketReadyState.OPEN);
   });
 });
