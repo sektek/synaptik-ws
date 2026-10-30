@@ -561,19 +561,23 @@ describe('WebSocketGateway', function () {
       await gateway.stop();
     });
 
-    it('passes an increasing attempt to a function restartDelay and resets it after a connection opens', async function () {
+    it('passes an increasing attempt to a restartDelayProvider and resets it after a connection opens', async function () {
       const ws1 = makeFakeWs();
       const ws2 = makeFakeWs();
       const refused = new Error('refused');
       const provider = new ScriptedProvider(ws1, refused, refused, ws2);
-      const restartDelay = sinon.stub().returns(10);
+      const attempts: number[] = [];
+      const restartDelayProvider = (attempt: number): number => {
+        attempts.push(attempt);
+        return 10;
+      };
       const onError = sinon.stub();
 
       const gateway = new WebSocketGateway({
         webSocketProvider: provider.handler,
         handler: sinon.stub().resolves(),
         autoRestart: true,
-        restartDelay,
+        restartDelayProvider,
       });
       gateway.on(EVENT_ERROR, onError);
 
@@ -581,20 +585,20 @@ describe('WebSocketGateway', function () {
       closeHandlerOf(ws1)();
       await clock.tickAsync(100);
 
-      expect(restartDelay.args.map(a => a[0])).to.deep.equal([0, 1, 2]);
+      expect(attempts).to.deep.equal([0, 1, 2]);
       expect(provider.calls).to.equal(4);
       expect(onError).to.have.been.calledTwice;
 
       closeHandlerOf(ws2)();
       await clock.tickAsync(100);
 
-      expect(restartDelay.getCall(3).args[0]).to.equal(0);
+      expect(attempts[3]).to.equal(0);
       expect(provider.calls).to.equal(5);
 
       await gateway.stop();
     });
 
-    it('accepts an asynchronous restartDelay function', async function () {
+    it('accepts an asynchronous restartDelayProvider', async function () {
       const ws1 = makeFakeWs();
       const provider = new ScriptedProvider(ws1);
 
@@ -602,7 +606,7 @@ describe('WebSocketGateway', function () {
         webSocketProvider: provider.handler,
         handler: sinon.stub().resolves(),
         autoRestart: true,
-        restartDelay: async () => 500,
+        restartDelayProvider: async () => 500,
       });
 
       await gateway.start();
@@ -612,6 +616,27 @@ describe('WebSocketGateway', function () {
       expect(provider.calls).to.equal(1);
 
       await clock.tickAsync(1);
+      expect(provider.calls).to.equal(2);
+
+      await gateway.stop();
+    });
+
+    it('prefers restartDelayProvider over restartDelay', async function () {
+      const ws1 = makeFakeWs();
+      const provider = new ScriptedProvider(ws1);
+
+      const gateway = new WebSocketGateway({
+        webSocketProvider: provider.handler,
+        handler: sinon.stub().resolves(),
+        autoRestart: true,
+        restartDelay: 5000,
+        restartDelayProvider: () => 100,
+      });
+
+      await gateway.start();
+      closeHandlerOf(ws1)();
+
+      await clock.tickAsync(100);
       expect(provider.calls).to.equal(2);
 
       await gateway.stop();

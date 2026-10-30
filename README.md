@@ -318,7 +318,8 @@ await gateway.start();
 
 By default a socket that closes is replaced immediately, so if the server is
 down the gateway can retry in a tight loop. Set `restartDelay` to a number of
-milliseconds, or a function of the restart `attempt`, to space restarts out:
+milliseconds, or `restartDelayProvider` to a function of the restart `attempt`,
+to space restarts out:
 
 ```ts
 const gateway = new WebSocketGateway({
@@ -326,14 +327,15 @@ const gateway = new WebSocketGateway({
   handler,
   autoRestart: true,
   // 1s, 2s, 4s, ... capped at 30s
-  restartDelay: attempt => Math.min(1000 * 2 ** attempt, 30_000),
+  restartDelayProvider: attempt => Math.min(1000 * 2 ** attempt, 30_000),
 });
 ```
 
 `attempt` is the number of consecutive failed restarts, so it is `0` for the
-first restart after a close, and it resets once a connection opens. When
-`restartDelay` is set, a restart that fails is reported with `event:error` and
-retried after the next delay. Without it, a failed restart is reported and the
+first restart after a close, and it resets once a connection opens.
+`restartDelayProvider` takes precedence over `restartDelay`. When either is
+set, a restart that fails is reported with `event:error` and
+retried after the next delay. Without one, a failed restart is reported and the
 gateway stays down until you call `start()` yourself. There is no retry limit,
 and `stop()` cancels a pending delay.
 
