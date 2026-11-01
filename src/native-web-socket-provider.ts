@@ -4,6 +4,7 @@ import {
   WebSocketLike,
   WebSocketProvider,
   WebSocketProviderOptions,
+  WebSocketReadyState,
 } from './types/index.js';
 
 /**
@@ -20,7 +21,7 @@ export type NativeWebSocketProviderOptions = WebSocketProviderOptions & {
  * Browser-native WebSocket provider.
  *
  * Lazily opens a single `WebSocket` connection on the first `get()` call and
- * nulls it on close, so the next `get()` reconnects automatically. The
+ * forgets it on close, so the next `get()` reconnects automatically. The
  * `urlProvider` is called fresh on every new connection so session URLs are
  * always current.
  *
@@ -48,21 +49,26 @@ export class NativeWebSocketProvider implements WebSocketProvider {
   /**
    * Open (or reuse) the underlying WebSocket and return it as `WebSocketLike`.
    *
-   * Concurrent calls while a connection is being established all share the same
-   * in-flight promise so only one socket is ever created.
+   * Resolves once the socket is open. A cached socket is only reused while it
+   * is open; otherwise a new one is created. Concurrent calls while a
+   * connection is being established all share the same in-flight promise so
+   * only one socket is ever created.
    *
-   * @returns The active `WebSocketLike` connection.
+   * @returns The open `WebSocketLike` connection.
+   * @throws {Error} If the connection fails or closes before it opens. The next call
+   * tries again.
    */
   async get(): Promise<WebSocketLike> {
-    if (this.#ws) return this.#ws;
+    if (this.#ws?.readyState === WebSocketReadyState.OPEN) return this.#ws;
+
+    this.#ws = null;
 
     if (!this.#pending) {
       this.#pending = (async () => {
         try {
           return await this.#createSocket();
-        } catch (err) {
+        } finally {
           this.#pending = null;
-          throw err;
         }
       })();
     }
@@ -75,8 +81,27 @@ export class NativeWebSocketProvider implements WebSocketProvider {
     const ws = new WebSocket(url as string | URL, this.#protocol);
 
     ws.addEventListener('close', () => {
-      this.#ws = null;
-      this.#pending = null;
+      if (this.#ws === ws) this.#ws = null;
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const onOpen = () => {
+        removeListeners();
+        resolve();
+      };
+      const onFailure = () => {
+        removeListeners();
+        reject(new Error('WebSocket failed to open'));
+      };
+      const removeListeners = () => {
+        ws.removeEventListener('open', onOpen);
+        ws.removeEventListener('error', onFailure);
+        ws.removeEventListener('close', onFailure);
+      };
+
+      ws.addEventListener('open', onOpen);
+      ws.addEventListener('error', onFailure);
+      ws.addEventListener('close', onFailure);
     });
 
     this.#ws = ws;

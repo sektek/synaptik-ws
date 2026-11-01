@@ -11,6 +11,7 @@ import {
   WebSocketLike,
   WebSocketProvider,
   WebSocketProviderOptions,
+  WebSocketReadyState,
 } from './types/index.js';
 
 /**
@@ -61,7 +62,7 @@ function toHeadersRecord(init: HeadersInit): Record<string, string> {
 /**
  * Node.js WebSocket provider backed by the `ws` package.
  *
- * Lazily opens a single connection on the first `get()` call and nulls it on
+ * Lazily opens a single connection on the first `get()` call and forgets it on
  * close, so the next `get()` reconnects automatically. Both `urlProvider` and
  * `headersProvider` are called fresh on every new connection so session URLs
  * and auth tokens are always current.
@@ -87,21 +88,28 @@ export class WsWebSocketProvider implements WebSocketProvider {
   /**
    * Open (or reuse) the underlying `ws.WebSocket` and return it as `WebSocketLike`.
    *
-   * Concurrent calls while a connection is being established all share the same
-   * in-flight promise so only one socket is ever created.
+   * Resolves once the socket is open. A cached socket is only reused while it
+   * is open; otherwise a new one is created. Concurrent calls while a
+   * connection is being established all share the same in-flight promise so
+   * only one socket is ever created.
    *
-   * @returns The active `WebSocketLike` connection.
+   * @returns The open `WebSocketLike` connection.
+   * @throws {Error} If the connection fails or closes before it opens. The next call
+   * tries again.
    */
   async get(): Promise<WebSocketLike> {
-    if (this.#ws) return this.#ws as unknown as WebSocketLike;
+    if (this.#ws?.readyState === WebSocketReadyState.OPEN) {
+      return this.#ws as unknown as WebSocketLike;
+    }
+
+    this.#ws = null;
 
     if (!this.#pending) {
       this.#pending = (async () => {
         try {
           return await this.#createSocket();
-        } catch (err) {
+        } finally {
           this.#pending = null;
-          throw err;
         }
       })();
     }
@@ -122,8 +130,29 @@ export class WsWebSocketProvider implements WebSocketProvider {
     );
 
     ws.on('close', () => {
-      this.#ws = null;
-      this.#pending = null;
+      if (this.#ws === ws) this.#ws = null;
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const onOpen = () => {
+        ws.off('error', onFailure);
+        ws.off('close', onClose);
+        resolve();
+      };
+      const onFailure = (err: Error) => {
+        ws.off('open', onOpen);
+        ws.off('close', onClose);
+        reject(err);
+      };
+      const onClose = () => {
+        ws.off('open', onOpen);
+        ws.off('error', onFailure);
+        reject(new Error('WebSocket closed before it opened'));
+      };
+
+      ws.once('open', onOpen);
+      ws.once('error', onFailure);
+      ws.once('close', onClose);
     });
 
     this.#ws = ws;

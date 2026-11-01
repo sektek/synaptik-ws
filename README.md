@@ -46,7 +46,6 @@ the `Event` type, the component pattern and the providers used throughout.
   - [`NativeWebSocketProvider`](#nativewebsocketprovider)
   - [`WsWebSocketProvider`](#wswebsocketprovider)
   - [Reconnecting](#reconnecting)
-  - [Waiting for the socket to open](#waiting-for-the-socket-to-open)
   - [Using an existing socket](#using-an-existing-socket)
 - [`WebSocketChannel`](#websocketchannel)
 - [`WebSocketGateway`](#websocketgateway)
@@ -64,11 +63,7 @@ back:
 
 ```ts
 import { Event, EventBuilder } from '@sektek/synaptik';
-import {
-  WebSocketChannel,
-  WebSocketGateway,
-  WebSocketReadyState,
-} from '@sektek/synaptik-ws';
+import { WebSocketChannel, WebSocketGateway } from '@sektek/synaptik-ws';
 import { WsWebSocketProvider } from '@sektek/synaptik-ws/ws';
 
 type ChatEvent = Event<{ text: string }>;
@@ -88,23 +83,12 @@ const channel = new WebSocketChannel<ChatEvent>({
 
 await gateway.start();
 
-// A new socket is still connecting; wait for it before sending.
-const socket = (await provider.get()) as WebSocket;
-
-if (socket.readyState !== WebSocketReadyState.OPEN) {
-  await new Promise(resolve =>
-    socket.addEventListener('open', resolve, { once: true }),
-  );
-}
-
 await channel.send(
   await EventBuilder.with<ChatEvent>({ type: 'chat' }).create({ text: 'hi' }),
 );
 ```
 
-Both objects share one provider, so they share one socket. See
-[Waiting for the socket to open](#waiting-for-the-socket-to-open) for why the
-wait is needed.
+Both objects share one provider, so they share one socket.
 
 ## Providers
 
@@ -113,10 +97,13 @@ A provider resolves the `WebSocketLike` that a channel or gateway uses. The
 method) or a plain function, so you can supply your own. Both built-in providers
 behave the same way:
 
-- The socket is opened lazily, on the first `get()`.
+- The socket is opened lazily, on the first `get()`, which resolves once the
+  socket is open. If the connection fails or closes before it opens, `get()`
+  rejects and the next `get()` tries again.
 - Concurrent `get()` calls while a connection is being established share one
   socket.
-- When the socket closes, it is forgotten, and the next `get()` opens a new one.
+- A socket is only reused while it is open. When it closes, it is forgotten, and
+  the next `get()` opens a new one.
 - The URL is resolved fresh for every connection, so a session URL or signed
   token is current after a reconnect.
 
@@ -205,29 +192,6 @@ Providers reconnect lazily: nothing happens when a socket closes, and the next
 `send()`, so it picks up the new socket by itself. A `WebSocketGateway` only
 asks when it is started, so to keep listening after a disconnect, turn on
 [`autoRestart`](#reconnecting-automatically).
-
-### Waiting for the socket to open
-
-`get()` resolves as soon as the socket has been created, not when it is open.
-Sending on a socket that is still connecting throws, so `send()` rejects if
-it's the first thing you do. Wait for the socket to open first:
-
-```ts
-import { WebSocketReadyState } from '@sektek/synaptik-ws';
-
-const socket = (await provider.get()) as WebSocket;
-
-if (socket.readyState !== WebSocketReadyState.OPEN) {
-  await new Promise(resolve =>
-    socket.addEventListener('open', resolve, { once: true }),
-  );
-}
-```
-
-`WebSocketReadyState` names the `readyState` values: `CONNECTING`, `OPEN`,
-`CLOSING` and `CLOSED`. `WebSocketLike` doesn't declare the `open` event, so the
-socket is asserted to be a `WebSocket`; `ws.WebSocket` supports the same call.
-A gateway doesn't have this problem, because it only listens.
 
 ### Using an existing socket
 
@@ -456,13 +420,13 @@ The channel, gateway and providers use a structural interface instead of a
 concrete class. Both the browser `WebSocket` and `ws.WebSocket` satisfy it, so
 you can pass either, or anything that implements it:
 
-| Member                                                | Purpose                      |
-| ----------------------------------------------------- | ---------------------------- |
-| `send(data)`                                          | Transmit a string or binary  |
-| `close(code?, reason?)`                               | Start the close handshake    |
-| `addEventListener('message' \| 'close', listener)`    | Listen for messages, closure |
-| `removeEventListener('message' \| 'close', listener)` | Stop listening               |
-| `readyState`                                          | See `WebSocketReadyState`    |
+| Member                                                          | Purpose                            |
+| --------------------------------------------------------------- | ---------------------------------- |
+| `send(data)`                                                    | Transmit a string or binary        |
+| `close(code?, reason?)`                                         | Start the close handshake          |
+| `addEventListener('message' \| 'close' \| 'open', listener)`    | Listen for messages, closure, open |
+| `removeEventListener('message' \| 'close' \| 'open', listener)` | Stop listening                     |
+| `readyState`                                                    | See `WebSocketReadyState`          |
 
 ## License
 
