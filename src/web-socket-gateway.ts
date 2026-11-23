@@ -14,7 +14,13 @@ import {
   EventEmittingService,
   ProviderComponent,
   ProviderFn,
+  SERVICE_STARTED,
+  SERVICE_START_ERROR,
+  SERVICE_STOPPED,
+  SERVICE_STOP_ERROR,
+  ServiceEvents,
   getComponent,
+  isError,
 } from '@sektek/utility-belt';
 
 import {
@@ -39,10 +45,11 @@ export const DEFAULT_RESTART_DELAY = 0;
  * @template T The event type produced by the deserializer.
  */
 export type WebSocketGatewayEvents<T extends Event = Event> =
-  EventHandlerEvents<T> & {
-    /** Emitted when the underlying socket closes while the gateway is started. */
-    [CONNECTION_CLOSED]: () => void;
-  };
+  EventHandlerEvents<T> &
+    ServiceEvents & {
+      /** Emitted when the underlying socket closes while the gateway is started. */
+      [CONNECTION_CLOSED]: () => void;
+    };
 
 /**
  * Options for constructing a `WebSocketGateway`.
@@ -96,6 +103,14 @@ export type WebSocketGatewayOptions<T extends Event = Event> =
  *
  * Call `start()` to attach the message listener and `stop()` to detach it.
  * Emits `EVENT_RECEIVED`, `EVENT_PROCESSED`, and `EVENT_ERROR` lifecycle events.
+ *
+ * **Lifecycle events** - `start()` emits `service:started` once the message
+ * listener is attached, and `stop()` emits `service:stopped` once it is
+ * detached. If either fails, only the matching `service:startError` or
+ * `service:stopError` is emitted, carrying an `Error`, and the original thrown
+ * value is rethrown unchanged. A `start()` abandoned by a later `stop()` emits
+ * nothing. Automatic restarts go through `start()`, so they emit these events
+ * too.
  *
  * @template T The event type produced by the deserializer.
  */
@@ -154,17 +169,24 @@ export class WebSocketGateway<T extends Event = Event>
    * resolves, the in-flight `start()` is abandoned and no listener is attached.
    */
   async start(): Promise<void> {
-    this.#started = true;
-    this.#ws?.removeEventListener('message', this.#messageHandler);
-    this.#ws?.removeEventListener('close', this.#closeHandler);
-    this.#ws = null;
-    const gen = ++this.#generation;
-    const ws = await this.#webSocketProvider();
-    if (gen !== this.#generation) return;
-    this.#restartAttempt = 0;
-    this.#ws = ws;
-    this.#ws.addEventListener('message', this.#messageHandler);
-    this.#ws.addEventListener('close', this.#closeHandler);
+    try {
+      this.#started = true;
+      this.#ws?.removeEventListener('message', this.#messageHandler);
+      this.#ws?.removeEventListener('close', this.#closeHandler);
+      this.#ws = null;
+      const gen = ++this.#generation;
+      const ws = await this.#webSocketProvider();
+      if (gen !== this.#generation) return;
+      this.#restartAttempt = 0;
+      this.#ws = ws;
+      this.#ws.addEventListener('message', this.#messageHandler);
+      this.#ws.addEventListener('close', this.#closeHandler);
+    } catch (err) {
+      this.emit(SERVICE_START_ERROR, toError(err));
+      throw err;
+    }
+
+    this.emit(SERVICE_STARTED);
   }
 
   /**
@@ -174,11 +196,18 @@ export class WebSocketGateway<T extends Event = Event>
    * suppresses any pending auto-restart triggered by a socket close.
    */
   async stop(): Promise<void> {
-    this.#started = false;
-    ++this.#generation;
-    this.#ws?.removeEventListener('message', this.#messageHandler);
-    this.#ws?.removeEventListener('close', this.#closeHandler);
-    this.#ws = null;
+    try {
+      this.#started = false;
+      ++this.#generation;
+      this.#ws?.removeEventListener('message', this.#messageHandler);
+      this.#ws?.removeEventListener('close', this.#closeHandler);
+      this.#ws = null;
+    } catch (err) {
+      this.emit(SERVICE_STOP_ERROR, toError(err));
+      throw err;
+    }
+
+    this.emit(SERVICE_STOPPED);
   }
 
   #handleClose(): void {
@@ -254,4 +283,16 @@ export class WebSocketGateway<T extends Event = Event>
       );
     return Infinity;
   }
+}
+
+/**
+ * Normalizes a thrown value to an `Error` for lifecycle error events.
+ *
+ * @param thrown - The value that was thrown.
+ * @returns `thrown` if it is an `Error`, otherwise an `Error` wrapping it as `cause`.
+ */
+function toError(thrown: unknown): Error {
+  return isError(thrown)
+    ? thrown
+    : new Error(String(thrown), { cause: thrown });
 }

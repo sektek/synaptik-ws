@@ -4,6 +4,15 @@ import {
   EVENT_RECEIVED,
   Event,
 } from '@sektek/synaptik';
+import {
+  ProcessManager,
+  SERVICE_STARTED,
+  SERVICE_START_ERROR,
+  SERVICE_STOPPED,
+  SERVICE_STOP_ERROR,
+  isStartable,
+  isStoppable,
+} from '@sektek/utility-belt';
 import { WebSocket, WebSocketServer } from 'ws';
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -58,6 +67,169 @@ describe('WebSocketGateway', function () {
     } else {
       done();
     }
+  });
+
+  describe('lifecycle events', function () {
+    it('is startable and stoppable', function () {
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => makeFakeWs(),
+        handler: sinon.stub().resolves(),
+      });
+
+      expect(isStartable(gateway)).to.be.true;
+      expect(isStoppable(gateway)).to.be.true;
+    });
+
+    it('emits SERVICE_STARTED then SERVICE_STOPPED once each', async function () {
+      const onStarted = sinon.stub();
+      const onStopped = sinon.stub();
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => makeFakeWs(),
+        handler: sinon.stub().resolves(),
+      });
+      gateway.on(SERVICE_STARTED, onStarted).on(SERVICE_STOPPED, onStopped);
+
+      await gateway.start();
+      expect(onStarted).to.have.been.calledOnce;
+      expect(onStopped).not.to.have.been.called;
+
+      await gateway.stop();
+      expect(onStarted).to.have.been.calledOnce;
+      expect(onStopped).to.have.been.calledOnce;
+      expect(onStarted).to.have.been.calledBefore(onStopped);
+    });
+
+    it('emits SERVICE_START_ERROR and rejects with the same error when start() fails', async function () {
+      const failure = new Error('refused');
+      const onStarted = sinon.stub();
+      const onStartError = sinon.stub();
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => Promise.reject(failure),
+        handler: sinon.stub().resolves(),
+      });
+      gateway
+        .on(SERVICE_STARTED, onStarted)
+        .on(SERVICE_START_ERROR, onStartError);
+
+      await expect(gateway.start()).to.be.rejectedWith(failure);
+
+      expect(onStartError).to.have.been.calledOnceWithExactly(failure);
+      expect(onStarted).not.to.have.been.called;
+    });
+
+    it('wraps a non-Error start() failure in the event and rethrows the original', async function () {
+      const onStartError = sinon.stub();
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => Promise.reject('refused'),
+        handler: sinon.stub().resolves(),
+      });
+      gateway.on(SERVICE_START_ERROR, onStartError);
+
+      let thrown: unknown;
+      try {
+        await gateway.start();
+      } catch (err) {
+        thrown = err;
+      }
+
+      expect(thrown).to.equal('refused');
+      expect(onStartError).to.have.been.calledOnce;
+      const emitted = onStartError.firstCall.args[0] as Error;
+      expect(emitted).to.be.instanceOf(Error);
+      expect(emitted.message).to.equal('refused');
+      expect(emitted.cause).to.equal('refused');
+    });
+
+    it('emits SERVICE_STOP_ERROR and rejects with the same error when stop() fails', async function () {
+      const failure = new Error('detach failed');
+      const ws = makeFakeWs();
+      const onStopped = sinon.stub();
+      const onStopError = sinon.stub();
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => ws,
+        handler: sinon.stub().resolves(),
+      });
+      gateway
+        .on(SERVICE_STOPPED, onStopped)
+        .on(SERVICE_STOP_ERROR, onStopError);
+      await gateway.start();
+      (ws.removeEventListener as sinon.SinonStub).throws(failure);
+
+      await expect(gateway.stop()).to.be.rejectedWith(failure);
+
+      expect(onStopError).to.have.been.calledOnceWithExactly(failure);
+      expect(onStopped).not.to.have.been.called;
+
+      (ws.removeEventListener as sinon.SinonStub).reset();
+      await gateway.stop();
+    });
+
+    it('wraps a non-Error stop() failure in the event and rethrows the original', async function () {
+      const ws = makeFakeWs();
+      const onStopError = sinon.stub();
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => ws,
+        handler: sinon.stub().resolves(),
+      });
+      gateway.on(SERVICE_STOP_ERROR, onStopError);
+      await gateway.start();
+      (ws.removeEventListener as sinon.SinonStub).callsFake(() => {
+        throw 'detach failed';
+      });
+
+      let thrown: unknown;
+      try {
+        await gateway.stop();
+      } catch (err) {
+        thrown = err;
+      }
+
+      expect(thrown).to.equal('detach failed');
+      const emitted = onStopError.firstCall.args[0] as Error;
+      expect(emitted).to.be.instanceOf(Error);
+      expect(emitted.cause).to.equal('detach failed');
+
+      (ws.removeEventListener as sinon.SinonStub).reset();
+      await gateway.stop();
+    });
+
+    it('emits nothing from a start() abandoned by stop()', async function () {
+      let release!: (ws: WebSocketLike) => void;
+      const onStarted = sinon.stub();
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () =>
+          new Promise<WebSocketLike>(resolve => {
+            release = resolve;
+          }),
+        handler: sinon.stub().resolves(),
+      });
+      gateway.on(SERVICE_STARTED, onStarted);
+
+      const starting = gateway.start();
+      await gateway.stop();
+      release(makeFakeWs());
+      await starting;
+
+      expect(onStarted).not.to.have.been.called;
+    });
+
+    it('is managed by a ProcessManager', async function () {
+      const onStarted = sinon.stub();
+      const onStopped = sinon.stub();
+      const gateway = new WebSocketGateway({
+        webSocketProvider: () => makeFakeWs(),
+        handler: sinon.stub().resolves(),
+      });
+      gateway.on(SERVICE_STARTED, onStarted).on(SERVICE_STOPPED, onStopped);
+      const manager = new ProcessManager({});
+      manager.add(gateway);
+
+      await manager.start();
+      expect(onStarted).to.have.been.calledOnce;
+
+      await manager.stop();
+      expect(onStopped).to.have.been.calledOnce;
+    });
   });
 
   it('dispatches incoming messages to the handler', async function () {

@@ -399,17 +399,23 @@ Both classes are event emitters and emit Synaptik's standard lifecycle events.
 
 `WebSocketGateway`:
 
-| Event               | Arguments         | When                                                            |
-| ------------------- | ----------------- | --------------------------------------------------------------- |
-| `event:received`    | `event`           | A message was deserialized                                      |
-| `event:processed`   | `event`           | The handler finished                                            |
-| `event:error`       | `error`, `event?` | Size check, deserializer or handler failed, or a restart failed |
-| `connection:closed` | none              | The socket closed while the gateway was started                 |
+| Event                | Arguments         | When                                                            |
+| -------------------- | ----------------- | --------------------------------------------------------------- |
+| `event:received`     | `event`           | A message was deserialized                                      |
+| `event:processed`    | `event`           | The handler finished                                            |
+| `event:error`        | `error`, `event?` | Size check, deserializer or handler failed, or a restart failed |
+| `connection:closed`  | none              | The socket closed while the gateway was started                 |
+| `service:started`    | none              | `start()` attached the listener                                 |
+| `service:startError` | `error`           | `start()` failed; it rethrows the original error                |
+| `service:stopped`    | none              | `stop()` detached the listener                                  |
+| `service:stopError`  | `error`           | `stop()` failed; it rethrows the original error                 |
 
 `connection:closed` is also exported as the constant `CONNECTION_CLOSED`, and
 `event:received`, `event:processed`, `event:delivered` and `event:error` as
 `EVENT_RECEIVED`, `EVENT_PROCESSED`, `EVENT_DELIVERED` and `EVENT_ERROR` from
-`@sektek/synaptik`.
+`@sektek/synaptik`. The `service:*` events are exported as `SERVICE_STARTED`,
+`SERVICE_START_ERROR`, `SERVICE_STOPPED` and `SERVICE_STOP_ERROR` from
+`@sektek/utility-belt`.
 
 ```ts
 import { CONNECTION_CLOSED } from '@sektek/synaptik-ws';
