@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.0](https://github.com/sektek/synaptik-ws/compare/v0.0.3...v0.1.0) (2026-11-24)
+
+### ⚠ BREAKING CHANGES
+
+* **synaptik-ws:** emit lifecycle events from WebSocketGateway (#7)
+
+### Features
+
+* **synaptik-ws:** emit lifecycle events from WebSocketGateway ([#7](https://github.com/sektek/synaptik-ws/issues/7)) ([d55dd3a](https://github.com/sektek/synaptik-ws/commit/d55dd3a081414de107c1564c58cd537469125623))
+
 ## [0.0.3](https://github.com/sektek/synaptik-ws/compare/v0.0.2...v0.0.3) (2026-11-01)
 
 ### Features
