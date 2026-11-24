@@ -14,7 +14,13 @@ import {
   EventEmittingService,
   ProviderComponent,
   ProviderFn,
+  SERVICE_STARTED,
+  SERVICE_START_ERROR,
+  SERVICE_STOPPED,
+  SERVICE_STOP_ERROR,
+  ServiceEvents,
   getComponent,
+  toError,
 } from '@sektek/utility-belt';
 
 import {
@@ -36,13 +42,22 @@ export const DEFAULT_RESTART_DELAY = 0;
 /**
  * Events emitted by `WebSocketGateway`.
  *
+ * - `event:received`, `event:processed`, `event:error`: the message pipeline
+ *   events from `EventHandlerEvents`.
+ * - `connection:closed`: the socket closed while the gateway was started.
+ * - `service:started`: `start()` attached the message listener.
+ * - `service:startError`: `start()` failed. Carries an `Error`.
+ * - `service:stopped`: `stop()` detached the message listener.
+ * - `service:stopError`: `stop()` failed. Carries an `Error`.
+ *
  * @template T The event type produced by the deserializer.
  */
 export type WebSocketGatewayEvents<T extends Event = Event> =
-  EventHandlerEvents<T> & {
-    /** Emitted when the underlying socket closes while the gateway is started. */
-    [CONNECTION_CLOSED]: () => void;
-  };
+  EventHandlerEvents<T> &
+    ServiceEvents & {
+      /** Emitted when the underlying socket closes while the gateway is started. */
+      [CONNECTION_CLOSED]: () => void;
+    };
 
 /**
  * Options for constructing a `WebSocketGateway`.
@@ -97,6 +112,12 @@ export type WebSocketGatewayOptions<T extends Event = Event> =
  * Call `start()` to attach the message listener and `stop()` to detach it.
  * Emits `EVENT_RECEIVED`, `EVENT_PROCESSED`, and `EVENT_ERROR` lifecycle events.
  *
+ * Emits the `Service` lifecycle events; see `start()` and `stop()`. A failure
+ * emits only the matching `service:*Error` event, which carries an `Error`; a
+ * non-`Error` thrown value is wrapped, with the original as its `cause`.
+ * Listener exceptions are not isolated: they propagate to the caller of
+ * `start()` or `stop()`.
+ *
  * @template T The event type produced by the deserializer.
  */
 export class WebSocketGateway<T extends Event = Event>
@@ -150,21 +171,39 @@ export class WebSocketGateway<T extends Event = Event>
    * Resolve and cache the WebSocket, then attach the message listener.
    *
    * Safe to call multiple times: detaches from any previously cached socket
-   * before attaching to the new one. If `stop()` is called before the provider
-   * resolves, the in-flight `start()` is abandoned and no listener is attached.
+   * before attaching to the new one.
+   *
+   * Emits `service:started` once the message listener is attached. If `stop()`
+   * is called before the provider resolves, the in-flight `start()` is
+   * abandoned: it attaches no listener and emits nothing.
+   *
+   * If `start()` fails, it emits only `service:startError`, with the failure
+   * as an `Error` (a non-`Error` thrown value is wrapped, with the original as
+   * `cause`), and rethrows the original thrown value.
+   *
+   * Automatic restarts call `start()`, so each emits `service:started`. A
+   * restart whose `start()` fails emits `service:startError` in addition to
+   * `event:error`.
    */
   async start(): Promise<void> {
-    this.#started = true;
-    this.#ws?.removeEventListener('message', this.#messageHandler);
-    this.#ws?.removeEventListener('close', this.#closeHandler);
-    this.#ws = null;
-    const gen = ++this.#generation;
-    const ws = await this.#webSocketProvider();
-    if (gen !== this.#generation) return;
-    this.#restartAttempt = 0;
-    this.#ws = ws;
-    this.#ws.addEventListener('message', this.#messageHandler);
-    this.#ws.addEventListener('close', this.#closeHandler);
+    try {
+      this.#started = true;
+      this.#ws?.removeEventListener('message', this.#messageHandler);
+      this.#ws?.removeEventListener('close', this.#closeHandler);
+      this.#ws = null;
+      const gen = ++this.#generation;
+      const ws = await this.#webSocketProvider();
+      if (gen !== this.#generation) return;
+      this.#restartAttempt = 0;
+      this.#ws = ws;
+      this.#ws.addEventListener('message', this.#messageHandler);
+      this.#ws.addEventListener('close', this.#closeHandler);
+    } catch (err) {
+      this.emit(SERVICE_START_ERROR, toError(err));
+      throw err;
+    }
+
+    this.emit(SERVICE_STARTED);
   }
 
   /**
@@ -172,13 +211,25 @@ export class WebSocketGateway<T extends Event = Event>
    *
    * Invalidates any `start()` call that is still awaiting the provider, and
    * suppresses any pending auto-restart triggered by a socket close.
+   *
+   * Emits `service:stopped` once the message listener is detached. If `stop()`
+   * fails, it emits only `service:stopError`, with the failure as an `Error`
+   * (a non-`Error` thrown value is wrapped, with the original as `cause`), and
+   * rethrows the original thrown value.
    */
   async stop(): Promise<void> {
-    this.#started = false;
-    ++this.#generation;
-    this.#ws?.removeEventListener('message', this.#messageHandler);
-    this.#ws?.removeEventListener('close', this.#closeHandler);
-    this.#ws = null;
+    try {
+      this.#started = false;
+      ++this.#generation;
+      this.#ws?.removeEventListener('message', this.#messageHandler);
+      this.#ws?.removeEventListener('close', this.#closeHandler);
+      this.#ws = null;
+    } catch (err) {
+      this.emit(SERVICE_STOP_ERROR, toError(err));
+      throw err;
+    }
+
+    this.emit(SERVICE_STOPPED);
   }
 
   #handleClose(): void {
