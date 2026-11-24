@@ -20,7 +20,7 @@ import {
   SERVICE_STOP_ERROR,
   ServiceEvents,
   getComponent,
-  isError,
+  toError,
 } from '@sektek/utility-belt';
 
 import {
@@ -283,16 +283,4 @@ export class WebSocketGateway<T extends Event = Event>
       );
     return Infinity;
   }
-}
-
-/**
- * Normalizes a thrown value to an `Error` for lifecycle error events.
- *
- * @param thrown - The value that was thrown.
- * @returns `thrown` if it is an `Error`, otherwise an `Error` wrapping it as `cause`.
- */
-function toError(thrown: unknown): Error {
-  return isError(thrown)
-    ? thrown
-    : new Error(String(thrown), { cause: thrown });
 }
